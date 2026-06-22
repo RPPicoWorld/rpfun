@@ -1,15 +1,17 @@
 /**
  * @file main.c
- * @brief Example of adding serial communication
+ * @brief Enabling the second
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling serial communication on the Raspberry Pi Pico using the Pico SDK's stdio functions, which are
- * compatible with both ARM and RISC-V cores. This example demonstrates:
+ * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
+ * with a focus on cross-platform compatibility between ARM and RISC-V cores.
+ * This example demonstrates:
  * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
  * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
+ * - Synchronizing access to printf across both cores using a mutex to prevent interleaved output
  *
  */
 

@@ -6,10 +6,7 @@
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling serial communication on the Raspberry Pi Pico using the Pico SDK's stdio functions, which are
- * compatible with both ARM and RISC-V cores. This example demonstrates:
- * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
- * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
+ * Trying to push the RP2350 to its limits with a simple LED blink and tick example.
  *
  */
 
@@ -31,7 +28,7 @@
 #endif
 
 #ifndef TICK_DELAY
-#define TICK_DELAY 1000
+#define TICK_DELAY 1000 // 1000ms = 1 second
 #endif
 
 // Mutex for synchronizing access to printf
