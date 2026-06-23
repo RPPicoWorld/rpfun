@@ -105,9 +105,9 @@ void core1_entry() {
  */
 int main() {
 
-    vreg_set_voltage(VREG_VOLTAGE_1_30); // Set voltage to 1.30V for stable overclocking
+    vreg_set_voltage(VREG_VOLTAGE_1_10); // Set voltage to 1.30V for stable overclocking
 
-    set_sys_clock_khz(320000, true);
+    set_sys_clock_khz(300000, true);
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
