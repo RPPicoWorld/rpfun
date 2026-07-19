@@ -56,8 +56,8 @@ target_compile_options(main PRIVATE
 target_link_libraries(main 
     pico_stdlib
     pico_multicore
-    hardware_dma
     hardware_adc
+    hardware_dma
 )
 
 pico_enable_stdio_uart(main 1)

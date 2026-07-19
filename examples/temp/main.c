@@ -1,12 +1,17 @@
 /**
  * @file main.c
- * @brief Overclocking RP2350
+ * @brief Enabling the second
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Trying to push the RP2350 to its limits with a simple LED blink and tick example.
+ * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
+ * with a focus on cross-platform compatibility between ARM and RISC-V cores.
+ * This example demonstrates:
+ * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
+ * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
+ * - Synchronizing access to printf across both cores using a mutex to prevent interleaved output
  *
  */
 
@@ -14,12 +19,9 @@
 
 #include "hardware/adc.h"    // For ADC access (if needed)
 #include "hardware/clocks.h" // For clock frequency information
-#include "hardware/dma.h"    // For DMA access (if needed)
-#include "hardware/flash.h"  // For flash memory access
+#include "hardware/dma.h"    //
 #include "hardware/gpio.h"   // For GPIO control
 #include "hardware/timer.h"  // Required for hardware timer access
-#include "hardware/vreg.h"   // Needed for voltage scaling
-#include "pico/bootrom.h"    // For flash command execution
 #include "pico/multicore.h"  // For multicore support
 #include "pico/stdlib.h"     // For sleep and stdio initialization
 
@@ -32,7 +34,7 @@
 #endif
 
 #ifndef TICK_DELAY
-#define TICK_DELAY 1000 // 1000ms = 1 second
+#define TICK_DELAY 1000
 #endif
 
 // Mutex for synchronizing access to printf
@@ -82,8 +84,12 @@ bool repeating_timer_callback(struct repeating_timer *t) {
     // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
     adc_select_input(8);
 
-    // 1. Instantly pull a fresh, clean hardware conversion (integer only)
+    // 1. Instantly pull a fresh, clean hardware conversion
     internal_temp_raw = adc_read();
+
+    // 2. Perform the formula math immediately in the background
+    float voltage = internal_temp_raw * (3.3f / 4096.0f);
+    internal_temp_c = 27.0f - (voltage - 0.706f) / 0.001721f;
 
     return true; // Keep the timer running endlessly
 }
@@ -96,9 +102,9 @@ void init_automatic_temp_sensor() {
     // Hardcode channel 8 configuration to match the physical QFN-80 layout
     adc_select_input(8);
 
-    // Create a background hardware timer that fires every 500 milliseconds
+    // Create a background hardware timer that fires every 100 milliseconds
     static struct repeating_timer timer;
-    add_repeating_timer_ms(-500, repeating_timer_callback, NULL, &timer);
+    add_repeating_timer_ms(-100, repeating_timer_callback, NULL, &timer);
 }
 
 /**
@@ -114,6 +120,7 @@ void core1_entry() {
 
     while (1) {
 
+        // FIX 3: Read volatile variable atomically into a local copy
         now = systick;
 
         if (now >= next_tick) {
@@ -135,19 +142,6 @@ void core1_entry() {
  * @brief Main entry point for Core 0.
  */
 int main() {
-
-    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
-
-    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
-
-    // Wait a bit to ensure voltage stabilizes
-    for (volatile int i = 0; i < 100000; i++) {
-        __asm("nop");
-    }
-
-    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
-
-    set_sys_clock_khz(540000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -185,6 +179,7 @@ int main() {
 
     while (true) {
 
+        // FIX 3: Read volatile variable atomically into a local copy
         now = systick;
 
         if (now >= next_blink) {
@@ -194,32 +189,21 @@ int main() {
 
         if (now >= next_tick) {
 
-            // FIX: Load values into local variables constructed at runtime to prevent
-            // the compiler from compiling literal float constants inside QSPI flash memory.
-            volatile float v_ref = 3.3f;
-            volatile float adc_steps = 4096.0f;
-            volatile float temp_base = 27.0f;
-            volatile float slope_offset = 0.706f;
-            volatile float slope = 0.001721f;
-
-            float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
-            internal_temp_c = temp_base - (voltage - slope_offset) / slope;
+            // FIX 1: Accessing volatile multivariable sets atomically using local registers
+            uint16_t local_raw = internal_temp_raw;
+            float local_c = internal_temp_c;
 
             mutex_enter_blocking(&printf_mutex); // Ensure we've got exclusive access to printf
-            printf("Core 0 tick %lu (loop = %lu raw = %u c = %.2f)\n", now, loop_cnt, (unsigned int)internal_temp_raw, internal_temp_c);
+            printf("Core 0 tick %lu (loop = %lu raw = %u c = %.2f)\n", now, loop_cnt, (unsigned int)local_raw, local_c);
             mutex_exit(&printf_mutex);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
 
-        ++loop_cnt;
-
-<<<<<<< HEAD
-        // Give the memory bus and Core 0 a chance to breathe
+        // FIX 2: Prevent Core 0 from starving the bus/SIO registers during maximum performance loop runs
         tight_loop_contents();
-=======
-        tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
->>>>>>> bd086b45bd095598a30a0e37a7c3d688187e13d7
+
+        ++loop_cnt;
     }
 }
 
