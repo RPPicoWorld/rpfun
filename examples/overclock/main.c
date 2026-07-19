@@ -13,9 +13,11 @@
 // Include necessary headers from the Pico SDK
 
 #include "hardware/clocks.h" // For clock frequency information
+#include "hardware/flash.h"  // For flash memory access
 #include "hardware/gpio.h"   // For GPIO control
 #include "hardware/timer.h"  // Required for hardware timer access
 #include "hardware/vreg.h"   // Needed for voltage scaling
+#include "pico/bootrom.h"    // For flash command execution
 #include "pico/multicore.h"  // For multicore support
 #include "pico/stdlib.h"     // For sleep and stdio initialization
 
@@ -105,11 +107,18 @@ void core1_entry() {
  */
 int main() {
 
-    vreg_disable_voltage_limit();
+    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.30V for stable overclocking
+    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
 
-    set_sys_clock_khz(400000, true);
+    // Wait a bit to ensure voltage stabilizes
+    for (volatile int i = 0; i < 100000; i++) {
+        __asm("nop");
+    }
+
+    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
+
+    set_sys_clock_khz(540000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -160,6 +169,8 @@ int main() {
         }
 
         ++loop_cnt;
+
+        tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
     }
 }
 
