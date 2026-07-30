@@ -15,13 +15,13 @@
 #include "hardware/adc.h"    // For ADC access (if needed)
 #include "hardware/clocks.h" // For clock frequency information
 #include "hardware/dma.h"    // For DMA access (if needed)
-#include "hardware/flash.h"  // For flash memory access
-#include "hardware/gpio.h"   // For GPIO control
-#include "hardware/timer.h"  // Required for hardware timer access
-#include "hardware/vreg.h"   // Needed for voltage scaling
-#include "pico/bootrom.h"    // For flash command execution
-#include "pico/multicore.h"  // For multicore support
-#include "pico/stdlib.h"     // For sleep and stdio initialization
+// #include "hardware/flash.h"  // For flash memory access
+#include "hardware/gpio.h"  // For GPIO control
+#include "hardware/timer.h" // Required for hardware timer access
+#include "hardware/vreg.h"  // Needed for voltage scaling
+#include "pico/bootrom.h"   // For flash command execution
+#include "pico/multicore.h" // For multicore support
+#include "pico/stdlib.h"    // For sleep and stdio initialization
 
 // Include standard I/O for printf
 #include <stdint.h>
@@ -112,6 +112,7 @@ void core1_entry() {
 
     uint32_t now, loop_cnt = 0, next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start Core 1's ticks offset from Core 0
 
+    // Main loop for Core 1
     while (1) {
 
         now = systick;
@@ -139,11 +140,6 @@ int main() {
     vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
     vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
-
-    // Wait a bit to ensure voltage stabilizes
-    for (volatile int i = 0; i < 100000; i++) {
-        __asm("nop");
-    }
 
     rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
@@ -183,6 +179,7 @@ int main() {
 
     uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
 
+    // Main loop for Core 0
     while (true) {
 
         now = systick;

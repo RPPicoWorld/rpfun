@@ -6,3 +6,9 @@ video series:
 
 https://www.youtube.com/channel/UCfOTHhqLXys1hakTl6ep1pw
 
+## FreeRTOS
+
+FreeRTOS port is added with:
+
+
+git submodule add https://github.com/raspberrypi/FreeRTOS-Kernel.git FreeRTOS-Kernel
