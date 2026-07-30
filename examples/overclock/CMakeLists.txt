@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(sdkVersion 2.3.0)
+set(toolchainVersion 15_2_Rel1)
+set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -58,10 +58,11 @@ target_link_libraries(main
     pico_multicore
     hardware_dma
     hardware_adc
+    #hardware_hazard3
 )
 
 pico_enable_stdio_uart(main 1)
-pico_enable_stdio_usb(main 1)
+# pico_enable_stdio_usb(main 1)
 
 # create map/bin/hex file etc.
 pico_add_extra_outputs(main)
