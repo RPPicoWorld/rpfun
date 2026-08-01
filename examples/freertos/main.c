@@ -54,6 +54,7 @@ volatile float internal_temp_c = 0.0f;
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
+    gpio_put(PICO_DEFAULT_LED_PIN, 1);            // Drive pin HIGH immediately
     return PICO_OK;
 }
 
@@ -96,7 +97,7 @@ void busy_work_task(void *pvParameters) {
 
     while (1) {
         // Perform a heavy floating-point loop to consume CPU cycles
-        for (int i = 0; i < 600000; i++) {
+        for (int i = 0; i < 500000; i++) {
             result = (result * 1.000001f) + 0.000001f;
         }
 
@@ -119,7 +120,6 @@ void core1_entry_task(void *pvParameters) {
 
     if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
         printf("Core 1: Booting...\n");
-    xSemaphoreExit:
         xSemaphoreGive(printf_mutex);
     }
 
@@ -183,14 +183,14 @@ void core0_entry_task(void *pvParameters) {
  */
 int main() {
 
-    // vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
+    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    // vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
-    vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.60V for stable overclocking
+    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
+    // vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.60V for stable overclocking
 
-    // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
+    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(320000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    set_sys_clock_khz(420000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -227,7 +227,7 @@ int main() {
     stats_task_init(printf_mutex);
 
     // LED Task
-    xTaskCreate(led_blink_task, "LEDTask", 256, NULL, 1, NULL);
+    xTaskCreate(led_blink_task, "LEDTask", 126, NULL, 1, NULL);
 
     // Core 0 Task
     TaskHandle_t core0_handle = NULL;
@@ -256,6 +256,60 @@ int main() {
         "BusyWorker2",    // Name for FreeRTOS trace
         412,              // Stack depth (words)
         (void *)"Busy_2", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 3: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker3",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_3", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 4: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker4",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_4", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 5: Unpinned (FreeRTOS schedules on whichever core is free)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker5",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_5", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 6: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker6",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_6", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 7: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker7",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_7", // Parameter passed as task_name
+        1,                // Priority
+        NULL);
+
+    // Instance 8: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,   // Task function
+        "BusyWorker8",    // Name for FreeRTOS trace
+        412,              // Stack depth (words)
+        (void *)"Busy_8", // Parameter passed as task_name
         1,                // Priority
         NULL);
 

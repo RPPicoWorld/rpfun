@@ -46,6 +46,17 @@ add_executable(main
     stats.c
 )
 
+# Get the directory where the compiler executable lives
+get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+
+# Locate arm-none-eabi-size inside that directory
+find_program(CMAKE_SIZE_UTIL arm-none-eabi-size HINTS ${TOOLCHAIN_BIN_DIR})
+
+# Use the resolved executable path
+add_custom_command(TARGET main POST_BUILD
+    COMMAND ${CMAKE_SIZE_UTIL} $<TARGET_FILE:main>
+)
+
 target_include_directories(main PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
 )
