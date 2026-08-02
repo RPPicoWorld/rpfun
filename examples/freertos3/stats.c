@@ -116,7 +116,7 @@ BaseType_t stats_task_init(SemaphoreHandle_t xPrintfMutex) {
         "StatsTask",
         256, // 256-word stack allocation for formatted buffer printing
         NULL,
-        1, /* Low priority background task */
+        2, /* Low priority background task */
         NULL);
 }
 

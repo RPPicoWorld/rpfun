@@ -157,13 +157,18 @@ void busy_work_task(void *pvParameters) {
     const char *task_name = (const char *)pvParameters;
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    volatile float result = 1.0001f;
+    // Use volatile to prevent compiler optimizations from stripping the loop
+    volatile uint32_t result = 0x811C9DC5; // FNV offset basis
     uint32_t iteration_count = 0;
 
     while (1) {
-        // Perform a heavy floating-point loop to consume CPU cycles
-        for (int i = 0; i < 250000; i++) {
-            result = (result * 1.000001f) + 0.000001f;
+        // Perform a heavy integer mix loop to consume CPU cycles without floating-point
+        for (int i = 0; i < 200000; i++) {
+            // Integer mixing using multiplication, XOR, bitwise rotations, and addition
+            uint32_t temp = result ^ (uint32_t)i;
+            temp *= 16777619U;                  // FNV prime
+            temp = (temp << 13) | (temp >> 19); // Bitwise rotate left by 13
+            result = temp + 0x9E3779B9U;        // Golden ratio constant offset
         }
 
         iteration_count++;
@@ -189,19 +194,24 @@ void core0_entry_task(void *pvParameters) {
         // 1. Instantly pull a fresh, clean hardware conversion (integer only)
         uint16_t internal_temp_raw = adc_read();
 
-        // FIX: Load values into local variables constructed at runtime to prevent
-        // the compiler from compiling literal float constants inside QSPI flash memory.
-        volatile float v_ref = 3.3f;
-        volatile float adc_steps = 4096.0f;
-        volatile float temp_base = 27.0f;
-        volatile float slope_offset = 0.706f;
-        volatile float slope = 0.001721f;
+        // 1. Convert 12-bit ADC raw value directly to Microvolts (uV) with rounding
+        // (raw * 3,300,000 + 2048) / 4096
+        uint32_t uv = (((uint32_t)internal_temp_raw * 3300000U) + 2048U) >> 12;
 
-        float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
-        float internal_temp_c = temp_base - (voltage - slope_offset) / slope;
+        // 2. Compute Temperature in hundredths of a degree Celsius (0.01 °C resolution)
+        // Formula: T_c = 27.0 - (V_v - 0.706) / 0.001721
+        // Converted to uV: T_deci = 2700 - (uV - 706000) / 1721
+        int32_t temp_centidegrees = 2700 - (((int32_t)uv - 706000) / 1721);
+
+        // 3. Extract whole and fractional parts for display
+        int32_t temp_whole = temp_centidegrees / 100;
+        int32_t temp_frac = temp_centidegrees % 100;
+
+        if (temp_frac < 0)
+            temp_frac = -temp_frac; // Handle negative temperatures safely
 
         if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-            printf("Core 0 tick %lu (t = %.2f °C)\n", now / 1000, internal_temp_c);
+            printf("Core 0 tick %lu (t = %ld.%02ld °C)\n", now / 1000, temp_whole, temp_frac);
             xSemaphoreGive(printf_mutex);
         }
 
@@ -344,7 +354,7 @@ int main() {
         "Core0Task",
         1024,
         NULL,
-        1,
+        3,
         &core0_handle);
     vTaskCoreAffinitySet(core0_handle, (1 << 0)); // Pin Core 0 Task to Core 0
 
@@ -355,7 +365,7 @@ int main() {
         "Core1Task",
         1024,
         NULL,
-        1,
+        3,
         &core1_handle);
     vTaskCoreAffinitySet(core1_handle, (1 << 1)); // Pin Core 1 Task to Core 1
 
