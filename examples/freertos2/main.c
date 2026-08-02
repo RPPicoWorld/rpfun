@@ -47,9 +47,6 @@
 // Mutex for synchronizing access to printf
 static SemaphoreHandle_t printf_mutex = NULL;
 
-volatile uint16_t internal_temp_raw = 0;
-volatile float internal_temp_c = 0.0f;
-
 // Handle for the binary semaphore
 SemaphoreHandle_t test_semaphore = NULL;
 
@@ -109,12 +106,14 @@ void semaphore_test_task(void *pvParameters) {
 void notify_test_task(void *pvParameters) {
     while (true) {
         // Wait indefinitely (portMAX_DELAY) for the notification
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        // Will only execute when the notification is received
-        if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-            printf("Got notification at tick = %lu\n", xTaskGetTickCount());
-            xSemaphoreGive(printf_mutex);
+        if (ulCount > 0) {
+            // Will only execute when the notification is received
+            if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+                printf("Got notification at tick = %lu\n", xTaskGetTickCount());
+                xSemaphoreGive(printf_mutex);
+            }
         }
     }
 }
@@ -140,6 +139,44 @@ void busy_work_task(void *pvParameters) {
 
         // Brief delay (50ms) to allow StatsTask and IDLE tasks to execute
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(50));
+    }
+}
+
+/**
+ * @brief FreeRTOS Task for Core 0 execution.
+ */
+void core0_entry_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    uint32_t loop_cnt = 0;
+
+    while (1) {
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+        // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
+        adc_select_input(8);
+
+        // 1. Instantly pull a fresh, clean hardware conversion (integer only)
+        uint16_t internal_temp_raw = adc_read();
+
+        // FIX: Load values into local variables constructed at runtime to prevent
+        // the compiler from compiling literal float constants inside QSPI flash memory.
+        volatile float v_ref = 3.3f;
+        volatile float adc_steps = 4096.0f;
+        volatile float temp_base = 27.0f;
+        volatile float slope_offset = 0.706f;
+        volatile float slope = 0.001721f;
+
+        float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
+        float internal_temp_c = temp_base - (voltage - slope_offset) / slope;
+
+        if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+            printf("Core 0 tick %lu (t = %.2f °C)\n", now / 1000, internal_temp_c);
+            xSemaphoreGive(printf_mutex);
+        }
+
+        xTaskNotifyGive(test_notification); // Signal the notification to Core 1
+
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(TICK_DELAY));
     }
 }
 
@@ -175,56 +212,20 @@ void core1_entry_task(void *pvParameters) {
 }
 
 /**
- * @brief FreeRTOS Task for Core 0 execution.
- */
-void core0_entry_task(void *pvParameters) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    uint32_t loop_cnt = 0;
-
-    while (1) {
-        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
-        // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
-        adc_select_input(8);
-
-        // 1. Instantly pull a fresh, clean hardware conversion (integer only)
-        internal_temp_raw = adc_read();
-
-        // FIX: Load values into local variables constructed at runtime to prevent
-        // the compiler from compiling literal float constants inside QSPI flash memory.
-        volatile float v_ref = 3.3f;
-        volatile float adc_steps = 4096.0f;
-        volatile float temp_base = 27.0f;
-        volatile float slope_offset = 0.706f;
-        volatile float slope = 0.001721f;
-
-        float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
-        internal_temp_c = temp_base - (voltage - slope_offset) / slope;
-
-        if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-            printf("Core 0 tick %lu (t = %.2f °C)\n", now / 1000, internal_temp_c);
-            xSemaphoreGive(printf_mutex);
-        }
-
-        xTaskNotifyGive(test_notification); // Signal the notification to Core 1
-
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(TICK_DELAY));
-    }
-}
-
-/**
- * @brief Main entry point for Core 0.
+ * @brief Main entry point for the FreeRTOS application on the RP2350.
+ * Initializes hardware, sets up tasks, and starts the FreeRTOS scheduler.
+ * @return int Returns 0 on successful execution (never reached due to scheduler).
  */
 int main() {
 
-    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
+    // vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
+    // vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
     // vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.60V for stable overclocking
 
-    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
+    // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(460000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    set_sys_clock_khz(340000, true); // Set system clock to 340 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -236,7 +237,7 @@ int main() {
     uart_set_baudrate(uart0, 921600);
 
     // Give UART a moment to stabilize
-    sleep_ms(50);
+    sleep_ms(10);
 
     // Create FreeRTOS Mutex for printf synchronization
     printf_mutex = xSemaphoreCreateMutex();
@@ -250,6 +251,7 @@ int main() {
                "Arm Cortex-M33",
 #endif
                frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) / 1000);
+
         xSemaphoreGive(printf_mutex);
     }
 
@@ -295,82 +297,99 @@ int main() {
 
     // Instance 1: Unpinned (FreeRTOS schedules on whichever core is free)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker1",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_1", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker1",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_1",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 2: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker2",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_2", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker2",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_2",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 3: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker3",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_3", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker3",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_3",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 4: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker4",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_4", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker4",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_4",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 5: Unpinned (FreeRTOS schedules on whichever core is free)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker5",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_5", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker5",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_5",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 6: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker6",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_6", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker6",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_6",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 7: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker7",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_7", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker7",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_7",         // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     // Instance 8: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
     xTaskCreate(
-        busy_work_task,   // Task function
-        "BusyWorker8",    // Name for FreeRTOS trace
-        412,              // Stack depth (words)
-        (void *)"Busy_8", // Parameter passed as task_name
-        1,                // Priority
+        busy_work_task,           // Task function
+        "BusyWorker8",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_8",         // Parameter passed as task_name
+        1,                        // Priority
+        NULL);
+
+    // Instance 9: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,           // Task function
+        "BusyWorker9",            // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_9",         // Parameter passed as task_name
+        1,                        // Priority
+        NULL);
+
+    // Instance 10: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
+    xTaskCreate(
+        busy_work_task,           // Task function
+        "BusyWorker10",           // Name for FreeRTOS trace
+        configMINIMAL_STACK_SIZE, // Stack depth (words)
+        (void *)"Busy_10",        // Parameter passed as task_name
+        1,                        // Priority
         NULL);
 
     /* --- Start the FreeRTOS Scheduler --- */
     vTaskStartScheduler();
 
-    while (1) {
-        // Will never be reached
-    }
+    while (1)
+        (void)0; // Will never be reached
 }
 
 // vim: ts=4 et nowrap

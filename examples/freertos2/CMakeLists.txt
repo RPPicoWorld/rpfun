@@ -26,14 +26,15 @@ set(PICO_PLATFORM rp2350)
 # Custom board headers
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_SOURCE_DIR}/boards/include" CACHE STRING "Extra board header dirs")
 set(PICO_BOARD sl_mcu_rp2354 CACHE STRING "Board type")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# 1. Pull in Raspberry Pi Pico SDK
+# Pull in Raspberry Pi Pico SDK
 include(pico_sdk_import.cmake)
 
-# 2. MUST be called first to declare languages (including ASM)
+# MUST be called first to declare languages (including ASM)
 project(main C CXX ASM)
 
-# 3. MUST be initialized to set up the toolchain rules for ASM
+# MUST be initialized to set up the toolchain rules for ASM
 pico_sdk_init()
 
 # 4. Now import FreeRTOS AFTER toolchain & ASM are initialized
