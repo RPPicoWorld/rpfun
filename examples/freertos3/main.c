@@ -31,11 +31,13 @@
 // Include standard I/O for printf
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* FreeRTOS Headers */
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
+#include "timers.h"
 
 #include "stats.h" // For FreeRTOS statistics monitoring
 
@@ -58,10 +60,15 @@ SemaphoreHandle_t printf_mutex = NULL;
 // Handle for the binary semaphore
 SemaphoreHandle_t test_semaphore = NULL;
 
+// Handle for led task
+TaskHandle_t led_task_handle = NULL;
+
 // Handle for the notification task
 TaskHandle_t test_notification = NULL; // We need this handle to send notifications to the task
 
 QueueHandle_t core_tick_queue = NULL; // Queue handle for inter-task communication
+
+TimerHandle_t led_timer_handle = NULL; // Timer handle for LED blinking
 
 // Perform initialisation
 int pico_led_init(void) {
@@ -90,13 +97,27 @@ void init_automatic_temp_sensor() {
     adc_select_input(8);
 }
 
+// Shared Callback Function for Timers
+void vTimerCallback(TimerHandle_t xTimer) {
+    if (xTimer == led_timer_handle) {
+        xTaskNotifyGive(led_task_handle); // Signal the led task to toggle the LED
+    }
+}
+
 /**
  * @brief FreeRTOS Task for LED Blinking.
  */
 void led_blink_task(void *pvParameters) {
     while (1) {
-        pico_toggle_led();
-        vTaskDelay(pdMS_TO_TICKS(LED_DELAY));
+
+        // Wait indefinitely (portMAX_DELAY) for the notification
+        uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        if (ulCount > 0) {
+            pico_toggle_led();
+        }
+
+        // vTaskDelay(pdMS_TO_TICKS(LED_DELAY));
     }
 }
 
@@ -163,7 +184,7 @@ void busy_work_task(void *pvParameters) {
 
     while (1) {
         // Perform a heavy integer mix loop to consume CPU cycles without floating-point
-        for (int i = 0; i < 200000; i++) {
+        for (int i = 0; i < 100000; i++) {
             // Integer mixing using multiplication, XOR, bitwise rotations, and addition
             uint32_t temp = result ^ (uint32_t)i;
             temp *= 16777619U;                  // FNV prime
@@ -191,33 +212,27 @@ void core0_entry_task(void *pvParameters) {
         // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
         adc_select_input(8);
 
-        // 1. Instantly pull a fresh, clean hardware conversion (integer only)
+        // Read ADC channel 8 (RP2350 internal temp sensor)
         uint16_t internal_temp_raw = adc_read();
 
-        // 1. Convert 12-bit ADC raw value directly to Microvolts (uV) with rounding
-        // (raw * 3,300,000 + 2048) / 4096
-        uint32_t uv = (((uint32_t)internal_temp_raw * 3300000U) + 2048U) >> 12;
+        // Perform math using 64-bit literals (LL) to avoid 32-bit overflow:
+        // Voltage in uV = (raw * 3,300,000) / 4096 => raw * 805.6640625
+        int64_t uv = ((int64_t)internal_temp_raw * 3300000LL) / 4096LL;
 
-        // 2. Compute Temperature in hundredths of a degree Celsius (0.01 °C resolution)
-        // Formula: T_c = 27.0 - (V_v - 0.706) / 0.001721
-        // Converted to uV: T_deci = 2700 - (uV - 706000) / 1721
-        int32_t temp_centidegrees = 2700 - (((int32_t)uv - 706000) / 1721);
+        // Compute temperature in tenths of a degree C (e.g. 409 = 40.9 °C)
+        // T = 27.0 - (V_uv - 706000) / 1721
+        int32_t temp_deci_c = 270 - (int32_t)(((uv - 706000LL) * 10LL) / 1721LL);
 
-        // 3. Extract whole and fractional parts for display
-        int32_t temp_whole = temp_centidegrees / 100;
-        int32_t temp_frac = temp_centidegrees % 100;
-
-        if (temp_frac < 0)
-            temp_frac = -temp_frac; // Handle negative temperatures safely
+        int32_t rem = temp_deci_c % 10;
 
         if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-            printf("Core 0 tick %lu (t = %ld.%02ld °C)\n", now / 1000, temp_whole, temp_frac);
+            printf("Core 0 tick %lu (r = %u t = %ld.%ld °C)\n", now / 1000, internal_temp_raw, temp_deci_c / 10, rem < 0 ? -rem : rem);
             xSemaphoreGive(printf_mutex);
         }
 
         struct core_tick_info_t core_tick_info = {
             0,
-            now / 1000
+            now
         };
         xQueueSend(core_tick_queue, (void *)&core_tick_info, (TickType_t)0);
 
@@ -255,7 +270,7 @@ void core1_entry_task(void *pvParameters) {
 
         struct core_tick_info_t core_tick_info = {
             1,
-            now / 1000
+            now
         };
         xQueueSend(core_tick_queue, (void *)&core_tick_info, (TickType_t)0);
 
@@ -320,8 +335,24 @@ int main() {
 
     test_semaphore = xSemaphoreCreateBinary();
 
+    led_timer_handle = xTimerCreate(
+        "LEDTimer",               // Text name
+        pdMS_TO_TICKS(LED_DELAY), // Timer period (500ms)
+        pdTRUE,                   // pdTRUE = Auto-Reload Timer
+        (void *)1,                // Timer ID
+        vTimerCallback            // Callback function
+    );
+
+    xTimerStart(led_timer_handle, 0);
+
     // LED Task
-    xTaskCreate(led_blink_task, "LEDTask", 126, NULL, 1, NULL);
+    xTaskCreate(
+        led_blink_task,
+        "LEDTask",
+        126,
+        NULL,
+        1,
+        &led_task_handle);
 
     xTaskCreate(
         queue_receive_task,

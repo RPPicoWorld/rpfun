@@ -162,7 +162,7 @@ void busy_work_task(void *pvParameters) {
 
     while (1) {
         // Perform a heavy floating-point loop to consume CPU cycles
-        for (int i = 0; i < 250000; i++) {
+        for (int i = 0; i < 100000; i++) {
             result = (result * 1.000001f) + 0.000001f;
         }
 
@@ -207,7 +207,7 @@ void core0_entry_task(void *pvParameters) {
 
         struct core_tick_info_t core_tick_info = {
             0,
-            now / 1000
+            now
         };
         xQueueSend(core_tick_queue, (void *)&core_tick_info, (TickType_t)0);
 
@@ -245,7 +245,7 @@ void core1_entry_task(void *pvParameters) {
 
         struct core_tick_info_t core_tick_info = {
             1,
-            now / 1000
+            now
         };
         xQueueSend(core_tick_queue, (void *)&core_tick_info, (TickType_t)0);
 
