@@ -42,7 +42,7 @@ add_executable(main
     main.c
 )
 
-# 1. GENERATE PIO HEADER BEFORE TARGET_LINK_LIBRARIES
+# Generate pio header
 pico_generate_pio_header(main 
     ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio
 )

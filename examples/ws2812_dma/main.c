@@ -35,11 +35,11 @@
 #define WS2812_PIN 29
 #define IS_RGBW false
 
-#define WS2812_FRAME_DELAY 20   // 20ms update interval (~50 FPS)
-#define PATTERN_SWAP_DELAY 5000 // Switch pattern every 5 seconds
+#define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
+#define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Max brightness factor (0 = off, 255 = 100% full brightness)
-#define MAX_BRIGHTNESS 128 // ~25% brightness
+#define MAX_BRIGHTNESS 64 // ~25% brightness
 
 // Mutex for synchronizing access to printf
 auto_init_mutex(printf_mutex);

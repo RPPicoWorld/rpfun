@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief Handling WS1812 LED strip with PIO on the RP2350, along with a simple LED blink and tick example.
+ * @brief Handling WS1812 LED strip with PIO on the RP2350
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
@@ -27,25 +27,22 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#ifndef LED_DELAY
-#define LED_DELAY 500 // 500ms
-#endif
-
-#ifndef TICK_DELAY
+// Define timing constants for LED blinking and tick reporting
+#define LED_DELAY 500   // 500ms
 #define TICK_DELAY 1000 // 1000ms = 1 second
-#endif
 
 // WS2812 LED configuration
 #define NUM_LEDS 64
 #define WS2812_PIN 29
 #define IS_RGBW false
 
-// Timing constants for WS2812 and pattern switching
-#define WS2812_FRAME_DELAY 20   // 20ms update interval (~50 FPS)
-#define PATTERN_SWAP_DELAY 5000 // Switch pattern every 5 seconds
+// Max brightness factor (0 = completely off, 255 = 100% full brightness)
+// WS2812s at 100% white pull ~3.8A for 64 LEDs. Setting this lower saves power.
+#define MAX_BRIGHTNESS 64 // ~25% brightness
 
-// Mutex for synchronizing access to printf
-auto_init_mutex(printf_mutex);
+// Timing constants for WS2812 demo and pattern switching
+#define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
+#define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -97,12 +94,28 @@ static inline uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 /**
- * @brief Sends a pixel color to the WS2812 LED strip using PIO.
+ * @brief Sends a pixel color to the WS2812 LED strip using PIO with brightness scaling.
  * @param pio The PIO instance to use (pio0 or pio1)
  * @param sm The state machine number to use (0-3)
  * @param pixel_grb The 32-bit GRB color value to send
  */
 static inline void put_pixel(PIO pio, uint sm, uint32_t pixel_grb) {
+
+#if defined(MAX_BRIGHTNESS) && (MAX_BRIGHTNESS < 255)
+    // Extract color channels
+    uint8_t g = (pixel_grb >> 16) & 0xFF;
+    uint8_t r = (pixel_grb >> 8) & 0xFF;
+    uint8_t b = pixel_grb & 0xFF;
+
+    // Scale each channel by MAX_BRIGHTNESS / 256
+    g = (g * MAX_BRIGHTNESS) >> 8;
+    r = (r * MAX_BRIGHTNESS) >> 8;
+    b = (b * MAX_BRIGHTNESS) >> 8;
+
+    // Repack scaled GRB value
+    pixel_grb = urgb_u32(r, g, b);
+#endif
+
     // WS2812 expects bits aligned to the upper 24 bits of a 32-bit word
     pio_sm_put_blocking(pio, sm, pixel_grb << 8u);
 }
@@ -245,7 +258,6 @@ int main() {
     // Give UART a moment to stabilize
     sleep_ms(50);
 
-    mutex_enter_blocking(&printf_mutex); // Mutex is not strictly necessary here since Core 1 hasn't started yet, but it's good practice to be consistent
     printf("\n\n\nCore 0: Booting...\n");
     printf("Running on %s at %d MHz\n",
 #ifdef __riscv
@@ -254,7 +266,6 @@ int main() {
            "Arm Cortex-M33",
 #endif
            frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) / 1000);
-    mutex_exit(&printf_mutex);
 
     // Start the heartbeat (Cross-Platform)
     universal_tick_init();
@@ -274,21 +285,18 @@ int main() {
 
         now = systick;
 
+        ws2812_demo_update(pio, sm, now);
+
         if (now >= next_blink) {
             pico_toggle_led();
             next_blink = now + LED_DELAY;
         }
 
         if (now >= next_tick) {
-
-            mutex_enter_blocking(&printf_mutex); // Ensure we've got exclusive access to printf
             printf("Core 0 tick %lu (loop = %lu)\n", now, loop_cnt);
-            mutex_exit(&printf_mutex);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
-
-        ws2812_demo_update(pio, sm, now);
 
         ++loop_cnt;
 
