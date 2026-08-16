@@ -82,6 +82,7 @@ target_link_libraries(main
     hardware_pio
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
+    m 
 )
 
 pico_enable_stdio_uart(main 1)

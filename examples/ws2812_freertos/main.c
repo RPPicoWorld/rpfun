@@ -18,26 +18,28 @@
 
 // Include necessary headers from the Pico SDK
 
-#include "hardware/adc.h"    // For ADC access (if needed)
-#include "hardware/clocks.h" // For clock frequency information
-#include "hardware/dma.h"    // For DMA access (if needed)
-#include "hardware/gpio.h"   // For GPIO control
-#include "hardware/timer.h"  // Required for hardware timer access
-#include "hardware/vreg.h"   // Needed for voltage scaling
-#include "pico/bootrom.h"    // For flash command execution
-#include "pico/multicore.h"  // For multicore support
-#include "pico/stdlib.h"     // For sleep and stdio initialization
-
-// Include standard I/O for printf
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "hardware/adc.h"             // For ADC access (if needed)
+#include "hardware/clocks.h"          // For clock frequency information
+#include "hardware/dma.h"             // For DMA access (if needed)
+#include "hardware/gpio.h"            // For GPIO control
+#include "hardware/structs/sysinfo.h" // For accessing SYSINFO registers
+#include "hardware/timer.h"           // Required for hardware timer access
+#include "hardware/vreg.h"            // Needed for voltage scaling
+#include "pico/bootrom.h"             // For flash command execution
+#include "pico/multicore.h"           // For multicore support
+#include "pico/stdlib.h"              // For sleep and stdio initialization
 
 /* FreeRTOS Headers */
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
 #include "timers.h"
+
+// Include standard I/O for printf
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "ws2812.pio.h" // For WS2812 LED control
 
@@ -54,8 +56,9 @@
 #define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Max brightness factor (0 = off, 255 = 100% full brightness)
-#define MAX_BRIGHTNESS 64 // ~25% brightness
+#define MAX_BRIGHTNESS 128 // ~25% brightness
 
+// Define a structure to represent a WS2812 pixel with its index and RGB color components
 struct ws2812_pixel_t {
     uint16_t index; // Index of the LED in the strip (0 to NUM_LEDS-1)
     uint8_t red;    // Red component (0-255)
@@ -64,8 +67,8 @@ struct ws2812_pixel_t {
 };
 
 // --- DMA Globals ---
-static uint32_t led_buffer[NUM_LEDS];
-static int dma_chan = -1;
+static uint32_t led_buffer[NUM_LEDS]; // Buffer to hold the 24-bit GRB values for each LED, aligned to 32 bits for DMA transfer
+static int dma_chan = -1;             // DMA channel used for transferring led_buffer to the PIO state machine
 
 // Mutex for synchronizing access to printf
 SemaphoreHandle_t printf_mutex = NULL;
@@ -98,7 +101,7 @@ int pico_led_init(void) {
  * @brief Toggles the state of the default LED.
  */
 void pico_toggle_led() {
-    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
+    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN)); // Toggle the LED pin state using XOR operation
 }
 
 /**
@@ -166,23 +169,17 @@ void led_blink_task(void *pvParameters) {
 /**
  * @brief task to receive notifications
  */
-void ws2812_notify_task(void *pvParameters) {
+void ws2812_refresh_task(void *pvParameters) {
     while (true) {
-        // Wait indefinitely (portMAX_DELAY) for the notification
         uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         if (ulCount > 0) {
-            // Will only execute when the notification is received
-            if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-                printf("Got ws2812 notification at tick = %lu\n", xTaskGetTickCount());
-                xSemaphoreGive(printf_mutex);
+            // Wait ONLY if a previous transfer is active
+            while (dma_channel_is_busy(dma_chan)) {
+                vTaskDelay(1); // Yield execution to let DMA finish
             }
 
-            while (!dma_channel_is_busy(dma_chan)) {
-                // Wait for the DMA transfer to complete
-            }
-
-            // Re-arm read pointer to start of led_buffer and trigger
+            // Start DMA transaction
             dma_channel_set_read_addr(dma_chan, led_buffer, true);
         }
     }
@@ -190,23 +187,20 @@ void ws2812_notify_task(void *pvParameters) {
 
 void ws2812_queue_receive_task(void *pvParameters) {
     while (1) {
-
         struct ws2812_pixel_t pixel;
 
         if (xQueueReceive(ws2812_queue, &pixel, portMAX_DELAY) == pdPASS) {
+            // Apply brightness scaling
+            uint8_t r = (pixel.red * MAX_BRIGHTNESS) >> 8;
+            uint8_t g = (pixel.green * MAX_BRIGHTNESS) >> 8;
+            uint8_t b = (pixel.blue * MAX_BRIGHTNESS) >> 8;
 
-            if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-                printf("Received WS2812 pixel data r = %u g = %u b = %u\n", pixel.r, pixel.g, pixel.b);
-                xSemaphoreGive(printf_mutex);
-            }
+            // Pack 24-bit GRB value
+            uint32_t grb = ((uint32_t)g << 16) | ((uint32_t)r << 8) | (uint32_t)b;
 
-            pixel.red = (pixel.red * MAX_BRIGHTNESS) >> 8;
-            pixel.green = (pixel.green * MAX_BRIGHTNESS) >> 8;
-            pixel.blue = (pixel.blue * MAX_BRIGHTNESS) >> 8;
-
-            // Update the led_buffer with the received pixel data
+            // Align to upper 24 bits for the PIO state machine
             if (pixel.index < NUM_LEDS) {
-                led_buffer[pixel.index] = ((uint32_t)pixel.green << 16) | ((uint32_t)pixel.red << 8) | (uint32_t)pixel.blue;
+                led_buffer[pixel.index] = grb << 8u;
             }
         }
     }
@@ -278,6 +272,141 @@ void core1_entry_task(void *pvParameters) {
 }
 
 /**
+ * @brief Maps 2D (x, y) coordinates (0-7) to a vertical serpentine matrix index (0-63).
+ * (0,0) is top-left, (0,7) is bottom-left, (1,7) is bottom of 2nd column.
+ */
+static inline uint16_t get_matrix_index(uint8_t x, uint8_t y) {
+    if (x >= 8 || y >= 8)
+        return 0;
+
+    if (x % 2 == 0) {
+        // Even columns (0, 2, 4, 6): Downward (0 -> 7)
+        return (x * 8) + y;
+    } else {
+        // Odd columns (1, 3, 5, 7): Upward (7 -> 0)
+        return (x * 8) + (7 - y);
+    }
+}
+
+/**
+ * @brief Original FreeRTOS Demo Task mapped to 8x8 Serpentine Matrix
+ */
+void ws2812_demo_task(void *pvParameters) {
+
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    uint8_t pattern_mode = 0;
+    uint16_t state_counter = 0;
+    uint32_t pattern_swap_ticks = pdMS_TO_TICKS(PATTERN_SWAP_DELAY);
+    TickType_t next_pattern_time = xLastWakeTime + pattern_swap_ticks;
+
+    while (1) {
+        TickType_t now = xTaskGetTickCount();
+
+        // Switch animation pattern every 10 seconds
+        if (now >= next_pattern_time) {
+            pattern_mode = (pattern_mode + 1) % 4;
+            state_counter = 0;
+            next_pattern_time = now + pattern_swap_ticks;
+        }
+
+        // Generate animation frame
+        switch (pattern_mode) {
+        case 0: { // Rainbow Wave
+            for (int i = 0; i < NUM_LEDS; i++) {
+                uint8_t pos = (i * 256 / NUM_LEDS + state_counter) & 0xFF;
+                pos = 255 - pos;
+                uint8_t r, g, b;
+                if (pos < 85) {
+                    r = 255 - pos * 3;
+                    g = 0;
+                    b = pos * 3;
+                } else if (pos < 170) {
+                    pos -= 85;
+                    r = 0;
+                    g = pos * 3;
+                    b = 255 - pos * 3;
+                } else {
+                    pos -= 170;
+                    r = pos * 3;
+                    g = 255 - pos * 3;
+                    b = 0;
+                }
+                struct ws2812_pixel_t pixel = { .index = i, .red = r, .green = g, .blue = b };
+                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            }
+            state_counter += 2;
+            break;
+        }
+
+        case 1: { // Pixel Chaser with Fade Tail
+            uint16_t head = state_counter % NUM_LEDS;
+            for (int i = 0; i < NUM_LEDS; i++) {
+                struct ws2812_pixel_t pixel = { .index = i, .red = 0, .green = 0, .blue = 0 };
+                if (i == head) {
+                    pixel.red = 255;
+                    pixel.green = 255;
+                    pixel.blue = 255;
+                } else if (i == (head + NUM_LEDS - 1) % NUM_LEDS) {
+                    pixel.blue = 150;
+                } else if (i == (head + NUM_LEDS - 2) % NUM_LEDS) {
+                    pixel.blue = 40;
+                }
+                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            }
+            state_counter++;
+            break;
+        }
+
+        case 2: { // Color Wipe
+            uint16_t fill_len = (state_counter / 2) % (NUM_LEDS + 1);
+            uint8_t color_idx = (state_counter / (NUM_LEDS * 2)) % 3;
+
+            for (int i = 0; i < NUM_LEDS; i++) {
+                struct ws2812_pixel_t pixel = { .index = i, .red = 0, .green = 0, .blue = 0 };
+                if (i < fill_len) {
+                    if (color_idx == 0)
+                        pixel.red = 255;
+                    else if (color_idx == 1)
+                        pixel.green = 255;
+                    else
+                        pixel.blue = 255;
+                }
+                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            }
+            state_counter++;
+            break;
+        }
+
+        case 3: { // Breathing Pulse
+            uint8_t brightness;
+            uint8_t phase = state_counter & 0xFF;
+            brightness = (phase < 128) ? (phase * 2) : ((255 - phase) * 2);
+
+            for (int i = 0; i < NUM_LEDS; i++) {
+                struct ws2812_pixel_t pixel = {
+                    .index = i,
+                    .red = brightness,
+                    .green = brightness / 2,
+                    .blue = 0
+                };
+                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            }
+            state_counter += 2;
+            break;
+        }
+        }
+
+        // Signal refresh task to trigger DMA transfer once full frame is queued
+        if (ws2812_refresh_task_handle != NULL) {
+            xTaskNotifyGive(ws2812_refresh_task_handle);
+        }
+
+        // Target ~50 FPS (20ms interval)
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(WS2812_FRAME_DELAY));
+    }
+}
+
+/**
  * @brief Main entry point for the FreeRTOS application on the RP2350.
  * Initializes hardware, sets up tasks, and starts the FreeRTOS scheduler.
  * @return int Returns 0 on successful execution (never reached due to scheduler).
@@ -309,13 +438,17 @@ int main() {
     printf_mutex = xSemaphoreCreateMutex();
 
     if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+        // Read the revision field (bits 31:28) from SYSINFO_CHIP_ID
+        uint8_t stepping_rev = (sysinfo_hw->chip_id & SYSINFO_CHIP_ID_REVISION_BITS) >> SYSINFO_CHIP_ID_REVISION_LSB;
+
         printf("\n\n\nCore 0: Booting...\n");
-        printf("Running on %s at %d MHz\n",
+        printf("Running on %s (Stepping A%u) at %d MHz\n",
 #ifdef __riscv
                "RISC-V",
 #else
                "Arm Cortex-M33",
 #endif
+               stepping_rev,
                frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) / 1000);
 
         xSemaphoreGive(printf_mutex);
@@ -324,17 +457,24 @@ int main() {
     // Initialize the automatic temperature sensor reading via ADC
     init_automatic_temp_sensor();
 
-    // Initialize the WS2812 PIO and DMA for LED control
-    ws2812_program_init(pio0, 0, WS2812_PIN, IS_RGBW, 800000); // Initialize PIO for WS2812 at 800kHz
-    ws2812_dma_init(pio0, 0);                                  // Initialize DMA for WS2812 data transfer
+    // Select PIO instance and state machine
+    PIO pio = pio0;
+    int sm = 0;
+    uint offset = pio_add_program(pio, &ws2812_program);
+
+    // Initialize PIO for GPIO 29 at 800kHz target frequency
+    ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
+
+    // Initialize DMA hardware for PIO0 State Machine 0
+    ws2812_dma_init(pio, sm);
+
+    // Create FreeRTOS Queue for WS2812 pixel updates (holds up to full LED count)
+    ws2812_queue = xQueueCreate(NUM_LEDS, sizeof(struct ws2812_pixel_t));
+    hard_assert(ws2812_queue != NULL);
 
     /* --- FreeRTOS Task Creation --- */
 
     stats_task_init(printf_mutex);
-
-    core_tick_queue = xQueueCreate(5, sizeof(struct core_tick_info_t));
-
-    test_semaphore = xSemaphoreCreateBinary();
 
     led_timer_handle = xTimerCreate(
         "LEDTimer",               // Text name
@@ -360,23 +500,32 @@ int main() {
         "WSQueueTask",
         configMINIMAL_STACK_SIZE,
         NULL,
-        2,
+        3,
         NULL);
 
     xTaskCreate(
-        ws2812_notify_task,
-        "WS2812NotifyTask",
+        ws2812_refresh_task,
+        "RefreshTask",
         configMINIMAL_STACK_SIZE,
         NULL,
         2,
-        &ws2812_notification);
+        &ws2812_refresh_task_handle);
+
+    // Create the WS2812 Animation Demo Task
+    xTaskCreate(
+        ws2812_demo_task,
+        "WSDemoTask",
+        configMINIMAL_STACK_SIZE + 256,
+        NULL,
+        2,
+        &ws2812_demo_task_handle);
 
     // Core 0 Task
     TaskHandle_t core0_handle = NULL;
     xTaskCreate(
         core0_entry_task,
         "Core0Task",
-        1024,
+        512,
         NULL,
         3,
         &core0_handle);
@@ -387,109 +536,17 @@ int main() {
     xTaskCreate(
         core1_entry_task,
         "Core1Task",
-        1024,
+        512,
         NULL,
         3,
         &core1_handle);
     vTaskCoreAffinitySet(core1_handle, (1 << 1)); // Pin Core 1 Task to Core 1
 
-    /* --- Spawn Busy Workers --- */
-
-    // // Instance 1: Unpinned (FreeRTOS schedules on whichever core is free)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker1",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_1",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 2: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker2",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_2",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 3: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker3",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_3",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 4: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker4",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_4",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 5: Unpinned (FreeRTOS schedules on whichever core is free)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker5",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_5",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 6: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker6",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_6",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 7: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker7",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_7",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 8: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker8",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_8",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 9: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker9",            // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_9",         // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
-    // // Instance 10: Unpinned (Runs alongside BusyWorker1 across Core 0/1)
-    // xTaskCreate(
-    //     busy_work_task,           // Task function
-    //     "BusyWorker10",           // Name for FreeRTOS trace
-    //     configMINIMAL_STACK_SIZE, // Stack depth (words)
-    //     (void *)"Busy_10",        // Parameter passed as task_name
-    //     1,                        // Priority
-    //     NULL);
-
     /* --- Start the FreeRTOS Scheduler --- */
     vTaskStartScheduler();
 
     while (1)
-        (void)0; // Will never be reached
+        (void)0; // Should never be reached
 }
 
 // vim: ts=4 et nowrap autoindent
