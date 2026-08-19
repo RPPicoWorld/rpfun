@@ -1,23 +1,19 @@
 /**
  * @file main.c
- * @brief Using FreeRTOS on the RP2350 to demonstrate task notifications, semaphores and queues
+ * @brief Using FreeRTOS to drive a WS2812 LED matrix on the RP2350 microcontroller.
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
  * Demonstrates the use of FreeRTOS on the RP2350 microcontroller, including:
- * - Blinking the onboard LED at a defined interval.
- * - Reading the internal temperature sensor via ADC and calculating the temperature in Celsius.
- * - Simulating CPU load with busy work tasks that perform floating-point calculations.
- * - Using task notifications
- * - Using semaphores to sync tasks
- * - Using a queue
+ * - Multicore task management
+ * - WS2812 LED matrix control using PIO and DMA
+ * - Periodic tasks with timers
  *
  */
 
 // Include necessary headers from the Pico SDK
-
 #include "hardware/adc.h"             // For ADC access (if needed)
 #include "hardware/clocks.h"          // For clock frequency information
 #include "hardware/dma.h"             // For DMA access (if needed)
@@ -29,7 +25,7 @@
 #include "pico/multicore.h"           // For multicore support
 #include "pico/stdlib.h"              // For sleep and stdio initialization
 
-/* FreeRTOS Headers */
+// FreeRTOS Headers
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
@@ -56,7 +52,7 @@
 #define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Max brightness factor (0 = off, 255 = 100% full brightness)
-#define MAX_BRIGHTNESS 128 // ~25% brightness
+#define MAX_BRIGHTNESS 64 // ~25% brightness
 
 // Define a structure to represent a WS2812 pixel with its index and RGB color components
 struct ws2812_pixel_t {
@@ -85,11 +81,16 @@ TaskHandle_t ws2812_set_led_task_handle = NULL;
 // Handle for ws2812 demo
 TaskHandle_t ws2812_demo_task_handle = NULL;
 
-QueueHandle_t ws2812_queue = NULL; // Queue handle for WS2812 pixel data
+// Queue handle for WS2812 pixel data
+QueueHandle_t ws2812_queue = NULL;
 
-TimerHandle_t led_timer_handle = NULL; // Timer handle for LED blinking
+// Timer handle for LED blinking
+TimerHandle_t led_timer_handle = NULL;
 
-// Perform initialisation
+/**
+ * @brief Initializes the default LED GPIO pin for output.
+ * @return int Returns PICO_OK on success, or an error code on failure.
+ */
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
@@ -144,7 +145,10 @@ void ws2812_dma_init(PIO pio, uint sm) {
     );
 }
 
-// Shared Callback Function for Timers
+/**
+ * @brief Timer callback function.
+ * @param xTimer Timer handle.
+ */
 void vTimerCallback(TimerHandle_t xTimer) {
     if (xTimer == led_timer_handle) {
         xTaskNotifyGive(led_task_handle); // Signal the led task to toggle the LED
@@ -167,13 +171,14 @@ void led_blink_task(void *pvParameters) {
 }
 
 /**
- * @brief task to receive notifications
+ * @brief Trigger a DMA transfer to refresh the WS2812 LED strip.
  */
 void ws2812_refresh_task(void *pvParameters) {
     while (true) {
         uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         if (ulCount > 0) {
+
             // Wait ONLY if a previous transfer is active
             while (dma_channel_is_busy(dma_chan)) {
                 vTaskDelay(1); // Yield execution to let DMA finish
@@ -185,6 +190,9 @@ void ws2812_refresh_task(void *pvParameters) {
     }
 }
 
+/**
+ * @brief FreeRTOS Task to receive pixel data from the queue and update the led_buffer.
+ */
 void ws2812_queue_receive_task(void *pvParameters) {
     while (1) {
         struct ws2812_pixel_t pixel;
@@ -268,23 +276,6 @@ void core1_entry_task(void *pvParameters) {
         }
 
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(TICK_DELAY));
-    }
-}
-
-/**
- * @brief Maps 2D (x, y) coordinates (0-7) to a vertical serpentine matrix index (0-63).
- * (0,0) is top-left, (0,7) is bottom-left, (1,7) is bottom of 2nd column.
- */
-static inline uint16_t get_matrix_index(uint8_t x, uint8_t y) {
-    if (x >= 8 || y >= 8)
-        return 0;
-
-    if (x % 2 == 0) {
-        // Even columns (0, 2, 4, 6): Downward (0 -> 7)
-        return (x * 8) + y;
-    } else {
-        // Odd columns (1, 3, 5, 7): Upward (7 -> 0)
-        return (x * 8) + (7 - y);
     }
 }
 
@@ -476,6 +467,7 @@ int main() {
 
     stats_task_init(printf_mutex);
 
+    // Create the LED timer for periodic toggling
     led_timer_handle = xTimerCreate(
         "LEDTimer",               // Text name
         pdMS_TO_TICKS(LED_DELAY), // Timer period (500ms)
@@ -484,6 +476,7 @@ int main() {
         vTimerCallback            // Callback function
     );
 
+    // Start the LED timer
     xTimerStart(led_timer_handle, 0);
 
     // LED Task
@@ -525,7 +518,7 @@ int main() {
     xTaskCreate(
         core0_entry_task,
         "Core0Task",
-        512,
+        256,
         NULL,
         3,
         &core0_handle);
@@ -536,7 +529,7 @@ int main() {
     xTaskCreate(
         core1_entry_task,
         "Core1Task",
-        512,
+        256,
         NULL,
         3,
         &core1_handle);
@@ -545,8 +538,9 @@ int main() {
     /* --- Start the FreeRTOS Scheduler --- */
     vTaskStartScheduler();
 
-    while (1)
-        (void)0; // Should never be reached
+    while (1) {
+        (void)0; // Should never be reached but will do bugger all
+    }
 }
 
 // vim: ts=4 et nowrap autoindent

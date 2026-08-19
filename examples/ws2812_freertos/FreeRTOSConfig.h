@@ -51,7 +51,7 @@ extern uint64_t time_us_64(void);
 /* --- Memory Allocation --- */
 #define configSUPPORT_DYNAMIC_ALLOCATION 1
 #define configSUPPORT_STATIC_ALLOCATION 0
-#define configTOTAL_HEAP_SIZE ((size_t)(64 * 1024))
+#define configTOTAL_HEAP_SIZE ((size_t)(32 * 1024))
 
 /* --- Pico SDK Hardware Interoperability --- */
 #define configSUPPORT_PICO_SYNC_INTEROP 1

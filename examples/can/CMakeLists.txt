@@ -40,11 +40,13 @@ pico_sdk_init()
 # Add executable
 add_executable(main
     main.c
+    can/can2040.c
+)
 
 # Generate pio header
-#pico_generate_pio_header(main 
-#    ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio
-#)
+pico_generate_pio_header(main 
+    ${CMAKE_CURRENT_LIST_DIR}/can2040.pio
+)
 
 # Get the directory where the compiler executable lives
 get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
@@ -57,12 +59,6 @@ add_custom_command(TARGET main POST_BUILD
     COMMAND ${CMAKE_SIZE_UTIL} $<TARGET_FILE:main>
 )
 
-target_sources(main PUBLIC
-    ${CMAKE_CURRENT_LIST_DIR}/main.c
-    ${CMAKE_CURRENT_LIST_DIR}/can/can2040.c
-)
-
-
 # Add specific optimization flags to your 'main' target
 target_compile_options(main PRIVATE
     -O3
@@ -73,7 +69,7 @@ target_compile_options(main PRIVATE
 # LINK LIBRARIES (Include target_include_directories so the .h is found)
 target_include_directories(main PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/can
+    ${CMAKE_CURRENT_LIST_DIR}/can
 )
 
 target_link_libraries(main 

@@ -14,6 +14,8 @@
 #include <stdint.h>                     // uint32_t
 #include <string.h>                     // memset
 
+#include "can2040.pio.h"
+
 /****************************************************************
  * rp2040 and low-level helper functions
  ****************************************************************/
@@ -80,40 +82,40 @@ rp2040_gpio_peripheral(uint32_t gpio, int func, int pull_up) {
 #define can2040_offset_tx_got_recessive 25u
 #define can2040_offset_tx_write_pin 27u
 
-static const uint16_t can2040_program_instructions[] = {
-    0x0085, //  0: jmp    y--, 5
-    0x0048, //  1: jmp    x--, 8
-    0xe029, //  2: set    x, 9
-    0x00cc, //  3: jmp    pin, 12
-    0xc000, //  4: irq    nowait 0
-    0x00c0, //  5: jmp    pin, 0
-    0xc040, //  6: irq    clear 0
-    0xe429, //  7: set    x, 9                   [4]
-    0xf043, //  8: set    y, 3                   [16]
-    0xc104, //  9: irq    nowait 4               [1]
-    0x03c5, // 10: jmp    pin, 5                 [3]
-    0x0307, // 11: jmp    7                      [3]
-    0x0043, // 12: jmp    x--, 3
-    0x20c4, // 13: wait   1 irq, 4
-    0x4001, // 14: in     pins, 1
-    0xa046, // 15: mov    y, isr
-    0x01b2, // 16: jmp    x != y, 18             [1]
-    0xc002, // 17: irq    nowait 2
-    0x40eb, // 18: in     osr, 11
-    0x4054, // 19: in     y, 20
-    0xa047, // 20: mov    y, osr
-    0x8080, // 21: pull   noblock
-    0xa027, // 22: mov    x, osr
-    0x0098, // 23: jmp    y--, 24
-    0xa0e2, // 24: mov    osr, y
-    0x6021, // 25: out    x, 1
-    0x00df, // 26: jmp    pin, 31
-    0xb801, // 27: mov    pins, x                [24]
-    0x02d9, // 28: jmp    pin, 25                [2]
-    0x0058, // 29: jmp    x--, 24
-    0x6021, // 30: out    x, 1
-    0x011b, // 31: jmp    27                     [1]
-};
+// static const uint16_t can2040_program_instructions[] = {
+//     0x0085, //  0: jmp    y--, 5
+//     0x0048, //  1: jmp    x--, 8
+//     0xe029, //  2: set    x, 9
+//     0x00cc, //  3: jmp    pin, 12
+//     0xc000, //  4: irq    nowait 0
+//     0x00c0, //  5: jmp    pin, 0
+//     0xc040, //  6: irq    clear 0
+//     0xe429, //  7: set    x, 9                   [4]
+//     0xf043, //  8: set    y, 3                   [16]
+//     0xc104, //  9: irq    nowait 4               [1]
+//     0x03c5, // 10: jmp    pin, 5                 [3]
+//     0x0307, // 11: jmp    7                      [3]
+//     0x0043, // 12: jmp    x--, 3
+//     0x20c4, // 13: wait   1 irq, 4
+//     0x4001, // 14: in     pins, 1
+//     0xa046, // 15: mov    y, isr
+//     0x01b2, // 16: jmp    x != y, 18             [1]
+//     0xc002, // 17: irq    nowait 2
+//     0x40eb, // 18: in     osr, 11
+//     0x4054, // 19: in     y, 20
+//     0xa047, // 20: mov    y, osr
+//     0x8080, // 21: pull   noblock
+//     0xa027, // 22: mov    x, osr
+//     0x0098, // 23: jmp    y--, 24
+//     0xa0e2, // 24: mov    osr, y
+//     0x6021, // 25: out    x, 1
+//     0x00df, // 26: jmp    pin, 31
+//     0xb801, // 27: mov    pins, x                [24]
+//     0x02d9, // 28: jmp    pin, 25                [2]
+//     0x0058, // 29: jmp    x--, 24
+//     0x6021, // 30: out    x, 1
+//     0x011b, // 31: jmp    27                     [1]
+// };
 
 // Local names for PIO state machine IRQs
 #define SI_MAYTX PIO_IRQ0_INTE_SM0_BITS
