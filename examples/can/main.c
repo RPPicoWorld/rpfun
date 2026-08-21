@@ -101,12 +101,11 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
                 printf("Received UPT message request.\n");
                 struct can2040_msg response_msg;
 
+                uint32_t *i = (uint32_t *)&response_msg.data[0];
+                *i = systick / 1000; // Convert milliseconds to seconds for uptime
+
                 response_msg.id = CAN_ID_UPT;        // Respond with the same ID
                 response_msg.dlc = sizeof(uint32_t); // 4 bytes for uptime
-                response_msg.data[0] = (systick >> 24) & 0xFF;
-                response_msg.data[1] = (systick >> 16) & 0xFF;
-                response_msg.data[2] = (systick >> 8) & 0xFF;
-                response_msg.data[3] = systick & 0xFF;
 
                 can2040_transmit(&cbus, &response_msg);
 
@@ -116,12 +115,12 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
                 printf("Generated random value: %lu\n", random_value);
                 // Prepare response message
                 struct can2040_msg response_msg;
+
+                uint32_t *i = (uint32_t *)&response_msg.data[0];
+                *i = random_value;
+
                 response_msg.id = CAN_ID_RND;        // Respond with the same ID
                 response_msg.dlc = sizeof(uint32_t); // 4 bytes for random value
-                response_msg.data[0] = (random_value >> 24) & 0xFF;
-                response_msg.data[1] = (random_value >> 16) & 0xFF;
-                response_msg.data[2] = (random_value >> 8) & 0xFF;
-                response_msg.data[3] = random_value & 0xFF;
 
                 can2040_transmit(&cbus, &response_msg);
 
@@ -226,7 +225,7 @@ int main() {
         }
 
         if (now >= next_tick) {
-            printf("Core 0 tick %lu (loop = %lu)\n", now, loop_cnt);
+            printf("RP tick %lu (loop = %lu)\n", now / 1000, loop_cnt);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
