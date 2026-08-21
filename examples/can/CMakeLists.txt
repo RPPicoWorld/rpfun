@@ -75,6 +75,7 @@ target_include_directories(main PRIVATE
 target_link_libraries(main 
     pico_stdlib
     pico_multicore
+    pico_rand
     hardware_dma
     hardware_pio
     hardware_clocks
