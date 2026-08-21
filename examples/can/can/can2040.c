@@ -47,8 +47,7 @@ static inline uint32_t readl(const void *addr) {
 }
 
 // rp2040 helper function to clear a hardware reset bit
-static void
-rp2040_clear_reset(uint32_t reset_bit) {
+static void rp2040_clear_reset(uint32_t reset_bit) {
     if (resets_hw->reset & reset_bit) {
         hw_clear_bits(&resets_hw->reset, reset_bit);
         while (!(resets_hw->reset_done & reset_bit))
@@ -57,8 +56,7 @@ rp2040_clear_reset(uint32_t reset_bit) {
 }
 
 // Helper to set the mode and extended function of a pin
-static void
-rp2040_gpio_peripheral(uint32_t gpio, int func, int pull_up) {
+static void rp2040_gpio_peripheral(uint32_t gpio, int func, int pull_up) {
     padsbank0_hw->io[gpio] = (PADS_BANK0_GPIO0_IE_BITS | (PADS_BANK0_GPIO0_DRIVE_VALUE_4MA << PADS_BANK0_GPIO0_DRIVE_MSB) | (pull_up > 0 ? PADS_BANK0_GPIO0_PUE_BITS : 0) | (pull_up < 0 ? PADS_BANK0_GPIO0_PDE_BITS : 0));
     iobank0_hw->io[gpio].ctrl = func << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB;
 }
@@ -82,41 +80,6 @@ rp2040_gpio_peripheral(uint32_t gpio, int func, int pull_up) {
 #define can2040_offset_tx_got_recessive 25u
 #define can2040_offset_tx_write_pin 27u
 
-// static const uint16_t can2040_program_instructions[] = {
-//     0x0085, //  0: jmp    y--, 5
-//     0x0048, //  1: jmp    x--, 8
-//     0xe029, //  2: set    x, 9
-//     0x00cc, //  3: jmp    pin, 12
-//     0xc000, //  4: irq    nowait 0
-//     0x00c0, //  5: jmp    pin, 0
-//     0xc040, //  6: irq    clear 0
-//     0xe429, //  7: set    x, 9                   [4]
-//     0xf043, //  8: set    y, 3                   [16]
-//     0xc104, //  9: irq    nowait 4               [1]
-//     0x03c5, // 10: jmp    pin, 5                 [3]
-//     0x0307, // 11: jmp    7                      [3]
-//     0x0043, // 12: jmp    x--, 3
-//     0x20c4, // 13: wait   1 irq, 4
-//     0x4001, // 14: in     pins, 1
-//     0xa046, // 15: mov    y, isr
-//     0x01b2, // 16: jmp    x != y, 18             [1]
-//     0xc002, // 17: irq    nowait 2
-//     0x40eb, // 18: in     osr, 11
-//     0x4054, // 19: in     y, 20
-//     0xa047, // 20: mov    y, osr
-//     0x8080, // 21: pull   noblock
-//     0xa027, // 22: mov    x, osr
-//     0x0098, // 23: jmp    y--, 24
-//     0xa0e2, // 24: mov    osr, y
-//     0x6021, // 25: out    x, 1
-//     0x00df, // 26: jmp    pin, 31
-//     0xb801, // 27: mov    pins, x                [24]
-//     0x02d9, // 28: jmp    pin, 25                [2]
-//     0x0058, // 29: jmp    x--, 24
-//     0x6021, // 30: out    x, 1
-//     0x011b, // 31: jmp    27                     [1]
-// };
-
 // Local names for PIO state machine IRQs
 #define SI_MAYTX PIO_IRQ0_INTE_SM0_BITS
 #define SI_MATCHED PIO_IRQ0_INTE_SM2_BITS
@@ -131,16 +94,14 @@ enum { SM_SYNC = 0,
        SM_TX = 3 };
 
 // Return the gpio bank offset (on rp2350 chips)
-static uint32_t
-pio_gpiobase(struct can2040 *cd) {
+static uint32_t pio_gpiobase(struct can2040 *cd) {
     if (!IS_RP2350)
         return 0;
     return (cd->gpio_rx > 31 || cd->gpio_tx > 31) ? 16 : 0;
 }
 
 // Setup PIO "sync" state machine (state machine 0)
-static void
-pio_sync_setup(struct can2040 *cd) {
+static void pio_sync_setup(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     pio_sm_hw_t *sm = &pio_hw->sm[SM_SYNC];
     uint32_t gpio_rx = (cd->gpio_rx - pio_gpiobase(cd)) & 0x1f;
@@ -154,8 +115,7 @@ pio_sync_setup(struct can2040 *cd) {
 }
 
 // Setup PIO "rx" state machine (state machine 1)
-static void
-pio_rx_setup(struct can2040 *cd) {
+static void pio_rx_setup(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     pio_sm_hw_t *sm = &pio_hw->sm[SM_RX];
     uint32_t gpio_rx = (cd->gpio_rx - pio_gpiobase(cd)) & 0x1f;
@@ -167,8 +127,7 @@ pio_rx_setup(struct can2040 *cd) {
 }
 
 // Setup PIO "match" state machine (state machine 2)
-static void
-pio_match_setup(struct can2040 *cd) {
+static void pio_match_setup(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     pio_sm_hw_t *sm = &pio_hw->sm[SM_MATCH];
     sm->execctrl = ((can2040_offset_match_end - 1) << PIO_SM0_EXECCTRL_WRAP_TOP_LSB | can2040_offset_shared_rx_read << PIO_SM0_EXECCTRL_WRAP_BOTTOM_LSB);
@@ -182,8 +141,7 @@ pio_match_setup(struct can2040 *cd) {
 }
 
 // Setup PIO "tx" state machine (state machine 3)
-static void
-pio_tx_setup(struct can2040 *cd) {
+static void pio_tx_setup(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     pio_sm_hw_t *sm = &pio_hw->sm[SM_TX];
     uint32_t gpio_rx = (cd->gpio_rx - pio_gpiobase(cd)) & 0x1f;
@@ -199,38 +157,33 @@ pio_tx_setup(struct can2040 *cd) {
 }
 
 // Set PIO "sync" machine to signal "may transmit" (sm irq 0) on 11 idle bits
-static void
-pio_sync_normal_start_signal(struct can2040 *cd) {
+static void pio_sync_normal_start_signal(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     uint32_t eom_idx = can2040_offset_sync_found_end_of_message;
     pio_hw->instr_mem[eom_idx] = 0xe12a; // set x, 10 [1]
 }
 
 // Set PIO "sync" machine to signal "may transmit" (sm irq 0) on 17 idle bits
-static void
-pio_sync_slow_start_signal(struct can2040 *cd) {
+static void pio_sync_slow_start_signal(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     uint32_t eom_idx = can2040_offset_sync_found_end_of_message;
     pio_hw->instr_mem[eom_idx] = 0xa127; // mov x, osr [1]
 }
 
 // Test if PIO "rx" state machine has overflowed its fifos
-static int
-pio_rx_check_stall(struct can2040 *cd) {
+static int pio_rx_check_stall(struct can2040 *cd) {
     pio_hw_t *pio_hw = cd->pio_hw;
     return pio_hw->fdebug & (1 << (PIO_FDEBUG_RXSTALL_LSB + 1));
 }
 
 // Set PIO "match" state machine to raise a "matched" signal on a bit sequence
-static void
-pio_match_check(struct can2040 *cd, uint32_t match_key) {
+static void pio_match_check(struct can2040 *cd, uint32_t match_key) {
     pio_hw_t *pio_hw = cd->pio_hw;
     pio_hw->txf[SM_MATCH] = match_key;
 }
 
 // Calculate pos+bits identifier for PIO "match" state machine
-static uint32_t
-pio_match_calc_key(uint32_t raw_bits, uint32_t rx_bit_pos) {
+static uint32_t pio_match_calc_key(uint32_t raw_bits, uint32_t rx_bit_pos) {
     return (raw_bits & 0x1fffff) | ((-rx_bit_pos) << 21);
 }
 

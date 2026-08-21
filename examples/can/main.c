@@ -6,14 +6,13 @@
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Receive and send CAN messages using the can2040 library on the RP2040. This example demonstrates how to set up the CAN bus,
- * handle incoming messages, and transmit messages. It also includes a simple LED blink and tick example to show that the
- * program is running.
+ * Receive and send CAN messages using the can2040 library on the RP2040. This example demonstrates how to set
+ * up the CAN bus, handle incoming messages, and transmit messages. It also includes a simple LED blink and
+ * tick example to show that the program is running.
  *
  */
 
 // Include necessary headers from the Pico SDK
-
 #include "hardware/clocks.h" // For clock frequency information
 #include "hardware/dma.h"    // For DMA access (if needed)
 #include "hardware/gpio.h"   // For GPIO control
@@ -32,19 +31,6 @@
 // Define timing constants for LED blinking and tick reporting
 #define LED_DELAY 500   // 500ms
 #define TICK_DELAY 1000 // 1000ms = 1 second
-
-// WS2812 LED configuration
-#define NUM_LEDS 64
-#define WS2812_PIN 29
-#define IS_RGBW false
-
-// Max brightness factor (0 = completely off, 255 = 100% full brightness)
-// WS2812s at 100% white pull ~3.8A for 64 LEDs. Setting this lower saves power.
-#define MAX_BRIGHTNESS 64 // ~25% brightness
-
-// Timing constants for WS2812 demo and pattern switching
-#define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
-#define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -104,7 +90,7 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
         // Clean ID (mask off RTR and EFF bits)
         uint32_t clean_id = is_ext ? (msg->id & 0x1FFFFFFF) : (msg->id & 0x7FF);
 
-        printf("CAN RX: ID=0x%08lx [%s] [%s] DLC=%lu\n", clean_id, is_ext ? "EXT" : "STD", is_rtr ? "RTR" : "DATA", msg->dlc);
+        printf("RP CAN RX: ID=0x%08lx [%s] [%s] DLC=%lu\n", clean_id, is_ext ? "EXT" : "STD", is_rtr ? "RTR" : "DATA", msg->dlc);
 
         // Example message filter
         uint32_t id = msg->id;
