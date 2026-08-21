@@ -20,6 +20,7 @@
 #include "hardware/timer.h"  // Required for hardware timer access
 #include "hardware/vreg.h"   // Needed for voltage scaling
 #include "pico/multicore.h"  // For multicore support
+#include "pico/rand.h"       // For random number generation
 #include "pico/stdlib.h"     // For sleep and stdio initialization
 
 // Include standard I/O for printf
@@ -28,9 +29,11 @@
 
 #include "can2040.h" // Include CAN2040 header for CAN bus functionality
 
-// Define timing constants for LED blinking and tick reporting
-#define LED_DELAY 500   // 500ms
-#define TICK_DELAY 1000 // 1000ms = 1 second
+#define LED_DELAY 500   // LED blink delay in milliseconds
+#define TICK_DELAY 1000 // Tick delay in milliseconds
+
+#define CAN_ID_UPT 0b10111111100 // 0x5fc - 1532
+#define CAN_ID_RND 0b10111111101 // 0x5fd - 1533
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -91,6 +94,47 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
         uint32_t clean_id = is_ext ? (msg->id & 0x1FFFFFFF) : (msg->id & 0x7FF);
 
         printf("RP CAN RX: ID=0x%08lx [%s] [%s] DLC=%lu\n", clean_id, is_ext ? "EXT" : "STD", is_rtr ? "RTR" : "DATA", msg->dlc);
+
+        if (is_rtr) {
+            printf("RTR message received, no data payload.\n");
+            if (clean_id == CAN_ID_UPT) {
+                printf("Received UPT message request.\n");
+                struct can2040_msg response_msg;
+
+                response_msg.id = CAN_ID_UPT;        // Respond with the same ID
+                response_msg.dlc = sizeof(uint32_t); // 4 bytes for uptime
+                response_msg.data[0] = (systick >> 24) & 0xFF;
+                response_msg.data[1] = (systick >> 16) & 0xFF;
+                response_msg.data[2] = (systick >> 8) & 0xFF;
+                response_msg.data[3] = systick & 0xFF;
+
+                can2040_transmit(&cbus, &response_msg);
+
+            } else if (clean_id == CAN_ID_RND) {
+                printf("Received RND message request.\n");
+                uint32_t random_value = (int32_t)get_rand_32();
+                printf("Generated random value: %lu\n", random_value);
+                // Prepare response message
+                struct can2040_msg response_msg;
+                response_msg.id = CAN_ID_RND;        // Respond with the same ID
+                response_msg.dlc = sizeof(uint32_t); // 4 bytes for random value
+                response_msg.data[0] = (random_value >> 24) & 0xFF;
+                response_msg.data[1] = (random_value >> 16) & 0xFF;
+                response_msg.data[2] = (random_value >> 8) & 0xFF;
+                response_msg.data[3] = random_value & 0xFF;
+
+                can2040_transmit(&cbus, &response_msg);
+
+            } else {
+                printf("Unknown RTR message ID: 0x%08lx\n", msg->id);
+            }
+        } else {
+            printf("Data: ");
+            for (uint32_t i = 0; i < msg->dlc; ++i) {
+                printf("%02X ", msg->data[i]);
+            }
+            printf("\n");
+        }
 
         // Example message filter
         uint32_t id = msg->id;
@@ -170,7 +214,11 @@ int main() {
 
         now = systick;
 
-        // ws2812_demo_update(pio, sm, now);
+        if (MessageQueue.pull_pos != MessageQueue.push_pos) {
+            struct can2040_msg msg = MessageQueue.queue[MessageQueue.pull_pos % QUEUE_SIZE];
+            MessageQueue.pull_pos++;
+            printf("Dequeued CAN message: ID=0x%08lx, DLC=%lu\n", msg.id, msg.dlc);
+        }
 
         if (now >= next_blink) {
             pico_toggle_led();
