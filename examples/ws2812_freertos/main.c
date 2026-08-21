@@ -411,7 +411,7 @@ int main() {
 
     // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    // set_sys_clock_khz(340000, true); // Set system clock to 340 MHz, true means to wait for the clock to stabilize
+    // set_sys_clock_khz(540000, true); // Set system clock to 340 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
