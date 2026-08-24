@@ -67,7 +67,10 @@ void universal_tick_init() {
     add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
 }
 
-// Perform initialisation
+/**
+ * @brief Initializes the default LED GPIO pin.
+ * @return PICO_OK on success, error code on failure.
+ */
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
@@ -96,9 +99,9 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
         printf("RP CAN RX: ID=0x%08lx [%s] [%s] DLC=%lu\n", clean_id, is_ext ? "EXT" : "STD", is_rtr ? "RTR" : "DATA", msg->dlc);
 
         if (is_rtr) {
-            printf("RTR message received, no data payload.\n");
+            printf("RP RTR message received ");
             if (clean_id == CAN_ID_UPT) {
-                printf("Received UPT message request.\n");
+                printf("UPT\n");
                 struct can2040_msg response_msg;
 
                 uint32_t *i = (uint32_t *)&response_msg.data[0];
@@ -110,9 +113,9 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
                 can2040_transmit(&cbus, &response_msg);
 
             } else if (clean_id == CAN_ID_RND) {
-                printf("Received RND message request.\n");
+                printf("RND\n");
                 uint32_t random_value = (int32_t)get_rand_32();
-                printf("Generated random value: %lu\n", random_value);
+                printf("RP Generated random value: %lu\n", random_value);
                 // Prepare response message
                 struct can2040_msg response_msg;
 
@@ -125,10 +128,10 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
                 can2040_transmit(&cbus, &response_msg);
 
             } else {
-                printf("Unknown RTR message ID: 0x%08lx\n", msg->id);
+                printf("Unknown with ID 0x%08lx\n", msg->id);
             }
         } else {
-            printf("Data: ");
+            printf("RP Received data message: ");
             for (uint32_t i = 0; i < msg->dlc; ++i) {
                 printf("%02X ", msg->data[i]);
             }
