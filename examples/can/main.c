@@ -46,6 +46,8 @@ static struct {
     struct can2040_msg queue[QUEUE_SIZE];
 } MessageQueue;
 
+static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg); // Forward declaration of the CAN2040 callback function
+
 static struct can2040 cbus;
 
 /**
@@ -82,6 +84,30 @@ int pico_led_init(void) {
  */
 void pico_toggle_led() {
     gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
+}
+
+// PIO interrupt handler
+static void PIOx_IRQHandler(void) {
+    can2040_pio_irq_handler(&cbus);
+}
+
+// Initialize the can2040 module
+void canbus_setup(void) {
+    uint32_t pio_num = 0;
+    uint32_t sys_clock = SYS_CLK_HZ, bitrate = 990000;
+    uint32_t gpio_rx = 21, gpio_tx = 19;
+
+    // Setup canbus
+    can2040_setup(&cbus, pio_num);
+    can2040_callback_config(&cbus, can2040_cb);
+
+    // Enable irqs
+    irq_set_exclusive_handler(PIO0_IRQ_0, PIOx_IRQHandler);
+    irq_set_priority(PIO0_IRQ_0, 1);
+    irq_set_enabled(PIO0_IRQ_0, 1);
+
+    // Start canbus
+    can2040_start(&cbus, sys_clock, bitrate, gpio_rx, gpio_tx);
 }
 
 // Main canbus callback (called from irq handler)
@@ -152,30 +178,6 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
         MessageQueue.queue[push_pos % QUEUE_SIZE] = *msg;
         MessageQueue.push_pos = push_pos + 1;
     }
-}
-
-// PIO interrupt handler
-static void PIOx_IRQHandler(void) {
-    can2040_pio_irq_handler(&cbus);
-}
-
-// Initialize the can2040 module
-void canbus_setup(void) {
-    uint32_t pio_num = 0;
-    uint32_t sys_clock = SYS_CLK_HZ, bitrate = 1000000;
-    uint32_t gpio_rx = 21, gpio_tx = 19;
-
-    // Setup canbus
-    can2040_setup(&cbus, pio_num);
-    can2040_callback_config(&cbus, can2040_cb);
-
-    // Enable irqs
-    irq_set_exclusive_handler(PIO0_IRQ_0, PIOx_IRQHandler);
-    irq_set_priority(PIO0_IRQ_0, 1);
-    irq_set_enabled(PIO0_IRQ_0, 1);
-
-    // Start canbus
-    can2040_start(&cbus, sys_clock, bitrate, gpio_rx, gpio_tx);
 }
 
 /**
