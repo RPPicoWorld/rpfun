@@ -22,10 +22,13 @@
 #include "pico/bootrom.h"   // For flash command execution
 #include "pico/multicore.h" // For multicore support
 #include "pico/stdlib.h"    // For sleep and stdio initialization
+#include "pico/sync.h"      // For hardware barrier synchronization
 
 // Include standard I/O for printf
 #include <stdint.h>
 #include <stdio.h>
+
+#include "dhry.h" // Include Dhrystone benchmark header for reference
 
 #ifndef LED_DELAY
 #define LED_DELAY 500 // 500ms
@@ -35,8 +38,11 @@
 #define TICK_DELAY 1000 // 1000ms = 1 second
 #endif
 
-// Mutex for synchronizing access to printf
+// Define and auto-initialize the global printf mutex
 auto_init_mutex(printf_mutex);
+
+// Standard SDK hardware barrier instance
+static barrier_t start_barrier;
 
 volatile uint16_t internal_temp_raw = 0;
 volatile float internal_temp_c = 0.0f;
@@ -56,7 +62,7 @@ bool on_timer_tick(struct repeating_timer *t) {
 /**
  * @brief Universal tick initialization using the SDK timer pool.
  */
-void universal_tick_init() {
+void universal_tick_init(void) {
     static struct repeating_timer timer;
     // Negative delay means "measure from the start of the last callback"
     // to avoid jitter. -1ms = 1000us frequency.
@@ -73,7 +79,7 @@ int pico_led_init(void) {
 /**
  * @brief Toggles the state of the default LED.
  */
-void pico_toggle_led() {
+void pico_toggle_led(void) {
     gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
 }
 
@@ -88,7 +94,7 @@ bool repeating_timer_callback(struct repeating_timer *t) {
     return true; // Keep the timer running endlessly
 }
 
-void init_automatic_temp_sensor() {
+void init_automatic_temp_sensor(void) {
     // Initialize the ADC hardware block
     adc_init();
     adc_set_temp_sensor_enabled(true);
@@ -104,10 +110,20 @@ void init_automatic_temp_sensor() {
 /**
  * @brief Entry point for Core 1.
  */
-void core1_entry() {
+void core1_entry(void) {
 
-    mutex_enter_blocking(&printf_mutex); // Synchronize with Core 0 for printing
-    printf("Core 1: Booting...\n");
+    mutex_enter_blocking(&printf_mutex);
+    printf("Core 1: Waiting at barrier for synchronized benchmark start...\n");
+    mutex_exit(&printf_mutex);
+
+    // Synchronize both cores at start barrier
+    barrier_wait(&start_barrier);
+
+    // Run Dhrystone benchmark simultaneously on Core 1
+    run_dhrystone_benchmark(10000000, 1);
+
+    mutex_enter_blocking(&printf_mutex);
+    printf("Core 1: Booting main task loop...\n");
     mutex_exit(&printf_mutex);
 
     uint32_t now, loop_cnt = 0, next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start Core 1's ticks offset from Core 0
@@ -135,7 +151,7 @@ void core1_entry() {
 /**
  * @brief Main entry point for Core 0.
  */
-int main() {
+int main(void) {
 
     vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
@@ -157,7 +173,10 @@ int main() {
     // Give UART a moment to stabilize
     sleep_ms(50);
 
-    mutex_enter_blocking(&printf_mutex); // Mutex is not strictly necessary here since Core 1 hasn't started yet, but it's good practice to be consistent
+    // Initialize barrier for 2 cores
+    barrier_init(&start_barrier, 2);
+
+    mutex_enter_blocking(&printf_mutex);
     printf("\n\n\nCore 0: Booting...\n");
     printf("Running on %s at %d MHz\n",
 #ifdef __riscv
@@ -174,8 +193,18 @@ int main() {
     // Initialize the automatic temperature sensor reading via ADC and DMA
     init_automatic_temp_sensor();
 
-    // Launch core1_entry function on Core 1
+    // Launch Core 1 task loop
     multicore_launch_core1(core1_entry);
+
+    mutex_enter_blocking(&printf_mutex);
+    printf("\n=== Starting Parallel Dual-Core Dhrystone Benchmark ===\n");
+    mutex_exit(&printf_mutex);
+
+    // Synchronize Core 0 with Core 1 to ensure parallel start
+    barrier_wait(&start_barrier);
+
+    // Run Dhrystone benchmark on Core 0 simultaneously with Core 1
+    run_dhrystone_benchmark(10000000, 0);
 
     uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
 
@@ -211,8 +240,8 @@ int main() {
 
         ++loop_cnt;
 
-        tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
-
+        // Give the memory bus and Core 0 a chance to breathe
+        tight_loop_contents();
     }
 }
 

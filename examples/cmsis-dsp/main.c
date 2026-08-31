@@ -1,31 +1,34 @@
 /**
  * @file main.c
- * @brief Overclocking RP2350
+ * @brief Including CMSIS-DSP library for RP2350 with a simple LED blink and tick example.
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Trying to push the RP2350 to its limits with a simple LED blink and tick example.
+ * Including CMSIS-DSP for fast math functions on the RP2350. This example demonstrates a simple
+ * LED blink and tick counter using the Pico SDK.
  *
  */
 
 // Include necessary headers from the Pico SDK
 
+#include "cmsis_compiler.h"  // For __set_CPACR or direct register access
 #include "hardware/adc.h"    // For ADC access (if needed)
 #include "hardware/clocks.h" // For clock frequency information
 #include "hardware/dma.h"    // For DMA access (if needed)
-// #include "hardware/flash.h"  // For flash memory access
-#include "hardware/gpio.h"  // For GPIO control
-#include "hardware/timer.h" // Required for hardware timer access
-#include "hardware/vreg.h"  // Needed for voltage scaling
-#include "pico/bootrom.h"   // For flash command execution
-#include "pico/multicore.h" // For multicore support
-#include "pico/stdlib.h"    // For sleep and stdio initialization
+#include "hardware/gpio.h"   // For GPIO control
+#include "hardware/timer.h"  // Required for hardware timer access
+#include "hardware/vreg.h"   // Needed for voltage scaling
+#include "pico/bootrom.h"    // For flash command execution
+#include "pico/multicore.h"  // For multicore support
+#include "pico/stdlib.h"     // For sleep and stdio initialization
 
 // Include standard I/O for printf
 #include <stdint.h>
 #include <stdio.h>
+
+#include "arm_math.h" // For ARM math functions (if needed)
 
 #ifndef LED_DELAY
 #define LED_DELAY 500 // 500ms
@@ -106,28 +109,43 @@ void init_automatic_temp_sensor() {
  */
 void core1_entry() {
 
-    mutex_enter_blocking(&printf_mutex); // Synchronize with Core 0 for printing
-    printf("Core 1: Booting...\n");
+    mutex_enter_blocking(&printf_mutex);
+    printf("Core 1: Booting with CMSIS-DSP arm_cos_f32...\n");
     mutex_exit(&printf_mutex);
 
-    uint32_t now, loop_cnt = 0, next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start Core 1's ticks offset from Core 0
+    uint32_t now;
+    uint32_t loop_cnt = 0;
+    uint32_t next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start offset from Core 0
 
-    // Main loop for Core 1
+    // Variables for cosine calculation
+    float radians = 0.0f;
+    float cos_result = 0.0f;
+    const float step = 0.01f;
+
     while (1) {
+        // Run CMSIS-DSP cosine function (uses M33 FPU instructions)
+        cos_result = arm_cos_f32(radians);
+
+        // Step through angles (0 to 2*PI)
+        radians += step;
+        if (radians >= 6.28318530718f) {
+            radians = 0.0f;
+        }
 
         now = systick;
 
         if (now >= next_tick) {
             mutex_enter_blocking(&printf_mutex);
-            printf("Core 1 tick %lu (loop = %lu)\n", now, loop_cnt);
+            printf("Core 1 tick %lu (loop = %lu, rad = %.2f, cos = %.4f)\n", now, loop_cnt, radians, cos_result);
             mutex_exit(&printf_mutex);
+
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
 
         ++loop_cnt;
 
-        // Give the memory bus and Core 0 a chance to breathe
+        // Keep CPU active for peak throughput measurement
         tight_loop_contents();
     }
 }
@@ -137,13 +155,13 @@ void core1_entry() {
  */
 int main() {
 
-    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
+    // vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(VREG_VOLTAGE_1_60); // Set voltage to 1.60V for stable overclocking
+    vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.35V for stable overclocking
 
-    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
+    // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(540000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    set_sys_clock_khz(340000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -212,7 +230,6 @@ int main() {
         ++loop_cnt;
 
         tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
-
     }
 }
 
