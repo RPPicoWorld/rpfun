@@ -25,6 +25,7 @@
 #include "pico/stdlib.h"     // For sleep and stdio initialization
 
 // Include standard I/O for printf
+#include <math.h> // For standard C cosf()
 #include <stdint.h>
 #include <stdio.h>
 
@@ -38,11 +39,11 @@
 #define TICK_DELAY 1000 // 1000ms = 1 second
 #endif
 
+// Fixed workload: 500,000 iterations finishes in ~350ms (<500ms limit)
+#define TOTAL_CALCULATIONS 500000UL
+
 // Mutex for synchronizing access to printf
 auto_init_mutex(printf_mutex);
-
-volatile uint16_t internal_temp_raw = 0;
-volatile float internal_temp_c = 0.0f;
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -80,30 +81,6 @@ void pico_toggle_led() {
     gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
 }
 
-// This timer callback fires automatically in the background
-bool repeating_timer_callback(struct repeating_timer *t) {
-    // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
-    adc_select_input(8);
-
-    // 1. Instantly pull a fresh, clean hardware conversion (integer only)
-    internal_temp_raw = adc_read();
-
-    return true; // Keep the timer running endlessly
-}
-
-void init_automatic_temp_sensor() {
-    // Initialize the ADC hardware block
-    adc_init();
-    adc_set_temp_sensor_enabled(true);
-
-    // Hardcode channel 8 configuration to match the physical QFN-80 layout
-    adc_select_input(8);
-
-    // Create a background hardware timer that fires every 500 milliseconds
-    static struct repeating_timer timer;
-    add_repeating_timer_ms(-500, repeating_timer_callback, NULL, &timer);
-}
-
 /**
  * @brief Entry point for Core 1.
  */
@@ -114,8 +91,7 @@ void core1_entry() {
     mutex_exit(&printf_mutex);
 
     uint32_t now;
-    uint32_t loop_cnt = 0;
-    uint32_t next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start offset from Core 0
+    uint32_t next_tick = TICK_DELAY + (TICK_DELAY / 2); // Start offset 500ms from Core 0
 
     // Variables for cosine calculation
     float radians = 0.0f;
@@ -123,27 +99,32 @@ void core1_entry() {
     const float step = 0.01f;
 
     while (1) {
-        // Run CMSIS-DSP cosine function (uses M33 FPU instructions)
-        cos_result = arm_cos_f32(radians);
-
-        // Step through angles (0 to 2*PI)
-        radians += step;
-        if (radians >= 6.28318530718f) {
-            radians = 0.0f;
-        }
-
         now = systick;
 
         if (now >= next_tick) {
+            radians = 0.0f;
+            uint64_t start_us = time_us_64();
+
+            // Run fixed workload (< 500ms duration)
+            for (uint32_t i = 0; i < TOTAL_CALCULATIONS; i++) {
+                // Run CMSIS-DSP cosine function (uses M33 FPU instructions)
+                cos_result = arm_cos_f32(radians);
+
+                // Step through angles (0 to 2*PI)
+                radians += step;
+                if (radians >= 6.28318530718f) {
+                    radians = 0.0f;
+                }
+            }
+
+            uint32_t elapsed_us = (uint32_t)(time_us_64() - start_us);
+
             mutex_enter_blocking(&printf_mutex);
-            printf("Core 1 tick %lu (loop = %lu, rad = %.2f, cos = %.4f)\n", now, loop_cnt, radians, cos_result);
+            printf("Core 1 [CMSIS-DSP] tick %lu : %6.2f ms | Final rad = %.2f | cos = % .5f\n", now, elapsed_us / 1000.0f, radians, cos_result);
             mutex_exit(&printf_mutex);
 
-            loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
-
-        ++loop_cnt;
 
         // Keep CPU active for peak throughput measurement
         tight_loop_contents();
@@ -189,13 +170,14 @@ int main() {
     // Start the heartbeat (Cross-Platform)
     universal_tick_init();
 
-    // Initialize the automatic temperature sensor reading via ADC and DMA
-    init_automatic_temp_sensor();
-
     // Launch core1_entry function on Core 1
     multicore_launch_core1(core1_entry);
 
-    uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
+    uint32_t now, next_blink = LED_DELAY, next_tick = TICK_DELAY;
+
+    float radians = 0.0f;
+    float std_cos_val = 0.0f;
+    const float step = 0.01f;
 
     // Main loop for Core 0
     while (true) {
@@ -208,26 +190,29 @@ int main() {
         }
 
         if (now >= next_tick) {
+            radians = 0.0f;
+            uint64_t start_us = time_us_64();
 
-            // FIX: Load values into local variables constructed at runtime to prevent
-            // the compiler from compiling literal float constants inside QSPI flash memory.
-            volatile float v_ref = 3.3f;
-            volatile float adc_steps = 4096.0f;
-            volatile float temp_base = 27.0f;
-            volatile float slope_offset = 0.706f;
-            volatile float slope = 0.001721f;
+            // Run fixed workload (< 500ms duration)
+            for (uint32_t i = 0; i < TOTAL_CALCULATIONS; i++) {
 
-            float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
-            internal_temp_c = temp_base - (voltage - slope_offset) / slope;
+                // Run standard C cosf() function (software implementation)
+                std_cos_val = cosf(radians);
+
+                radians += step;
+                if (radians >= 6.28318530718f) {
+                    radians = 0.0f;
+                }
+            }
+
+            uint32_t elapsed_us = (uint32_t)(time_us_64() - start_us);
 
             mutex_enter_blocking(&printf_mutex); // Ensure we've got exclusive access to printf
-            printf("Core 0 tick %lu (loop = %lu raw = %u c = %.2f)\n", now, loop_cnt, (unsigned int)internal_temp_raw, internal_temp_c);
+            printf("Core 0 [std cosf]   tick %lu : %6.2f ms | Final rad = %.2f | cos = % .5f\n", now, elapsed_us / 1000.0f, radians, std_cos_val);
             mutex_exit(&printf_mutex);
-            loop_cnt = 0;
+
             next_tick = now + TICK_DELAY;
         }
-
-        ++loop_cnt;
 
         tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
     }

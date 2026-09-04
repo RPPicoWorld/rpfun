@@ -46,12 +46,12 @@ FetchContent_Declare(
     SOURCE_SUBDIR  CMSIS/Core
 )
 
-# 2. Configure CMSIS-DSP compile definitions & features
-set(CMSIS_DSP_FASTMATH OFF CACHE BOOL "" FORCE)
+# 2. Configure CMSIS-DSP compile options
+set(CMSIS_DSP_FASTMATH ON CACHE BOOL "" FORCE)
 set(DISABLE_STDPERIPH_DRIVER ON CACHE BOOL "" FORCE)
 set(CMSIS_DSP_PUBLISH_TARGETS OFF CACHE BOOL "" FORCE)
 
-# Enable Cortex-M33 DSP hardware instructions
+# Enable Cortex-M33 DSP hardware instructions globally
 add_compile_definitions(
     ARM_MATH_CM33
     ARM_MATH_DSP
@@ -72,6 +72,12 @@ FetchContent_MakeAvailable(cmsis_core cmsis_dsp)
 FetchContent_GetProperties(cmsis_core SOURCE_DIR cmsis_core_SOURCE_DIR)
 target_include_directories(CMSISDSP PUBLIC 
     $<BUILD_INTERFACE:${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include>
+)
+
+# Crucial: Enforce function/data section generation on CMSISDSP target
+target_compile_options(CMSISDSP PRIVATE
+    -ffunction-sections
+    -fdata-sections
 )
 # ------------------------------------------------------------------------------------
 
@@ -94,10 +100,16 @@ target_include_directories(main PRIVATE
     $<BUILD_INTERFACE:${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include>
 )
 
+# Optimizations & Section Generation for main executable
 target_compile_options(main PRIVATE
     -O3
     -ffunction-sections 
     -fdata-sections
+)
+
+# Crucial Fix: Tell Linker to Strip Dead Sections and Tables Across ALL Targets
+target_link_options(main PRIVATE
+    -Wl,--gc-sections
 )
 
 # Link Pico libraries and CMSIS-DSP
