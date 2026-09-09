@@ -38,7 +38,7 @@ pico_sdk_init()
 # ------------------------------------------------------------------------------------
 include(FetchContent)
 
-# 1. Fetch CMSIS-Core (Provides core_cm33.h and cmsis_compiler.h)
+# Fetch CMSIS-Core
 FetchContent_Declare(
     cmsis_core
     GIT_REPOSITORY https://github.com/ARM-software/CMSIS_5.git
@@ -46,18 +46,20 @@ FetchContent_Declare(
     SOURCE_SUBDIR  CMSIS/Core
 )
 
-# 2. Configure CMSIS-DSP compile options
+# Configure CMSIS-DSP compile options
 set(CMSIS_DSP_FASTMATH ON CACHE BOOL "" FORCE)
 set(DISABLE_STDPERIPH_DRIVER ON CACHE BOOL "" FORCE)
 set(CMSIS_DSP_PUBLISH_TARGETS OFF CACHE BOOL "" FORCE)
 
-# Enable Cortex-M33 DSP hardware instructions globally
+# Preprocessor definitions to enable DSP features in headers
 add_compile_definitions(
     ARM_MATH_CM33
     ARM_MATH_DSP
+    ARM_MATH_LOOPUNROLL
+    __FPU_PRESENT=1U
 )
 
-# 3. Fetch CMSIS-DSP repository
+# Fetch CMSIS-DSP repository
 FetchContent_Declare(
     cmsis_dsp
     GIT_REPOSITORY https://github.com/ARM-software/CMSIS-DSP.git
@@ -65,49 +67,39 @@ FetchContent_Declare(
     SOURCE_SUBDIR  Source
 )
 
-# Download and make targets available
 FetchContent_MakeAvailable(cmsis_core cmsis_dsp)
 
-# 4. Attach CMSIS-Core header path directly to the CMSISDSP library target
+# 4. Attach Core Includes & optimizations directly to CMSISDSP library
 FetchContent_GetProperties(cmsis_core SOURCE_DIR cmsis_core_SOURCE_DIR)
+
 target_include_directories(CMSISDSP PUBLIC 
     $<BUILD_INTERFACE:${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include>
 )
 
-# Crucial: Enforce function/data section generation on CMSISDSP target
+# Optimize CMSIS-DSP build without changing the ABI
 target_compile_options(CMSISDSP PRIVATE
+    -O3
     -ffunction-sections
     -fdata-sections
 )
 # ------------------------------------------------------------------------------------
 
-# Add executable
+# Executable setup
 add_executable(main main.c)
 
-# Get the directory where the compiler executable lives
-get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
-
-# Locate arm-none-eabi-size inside that directory
-find_program(CMAKE_SIZE_UTIL arm-none-eabi-size HINTS ${TOOLCHAIN_BIN_DIR})
-
-# Use the resolved executable path
-add_custom_command(TARGET main POST_BUILD
-    COMMAND ${CMAKE_SIZE_UTIL} $<TARGET_FILE:main>
-)
-
-# Add CMSIS Core includes to the main target as well
+# Add CMSIS Core includes to main
 target_include_directories(main PRIVATE 
     $<BUILD_INTERFACE:${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include>
 )
 
-# Optimizations & Section Generation for main executable
+# Optimizations for main executable
 target_compile_options(main PRIVATE
     -O3
     -ffunction-sections 
     -fdata-sections
 )
 
-# Crucial Fix: Tell Linker to Strip Dead Sections and Tables Across ALL Targets
+# Linker flags
 target_link_options(main PRIVATE
     -Wl,--gc-sections
 )

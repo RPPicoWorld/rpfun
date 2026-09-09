@@ -138,11 +138,11 @@ int main() {
 
     // vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.35V for stable overclocking
+    // vreg_set_voltage(VREG_VOLTAGE_1_35); // Set voltage to 1.35V for stable overclocking
 
     // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(340000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    // set_sys_clock_khz(340000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -170,14 +170,42 @@ int main() {
     // Start the heartbeat (Cross-Platform)
     universal_tick_init();
 
+    // Run comparison test on Core 1 using CMSIS-DSP arm_cos_f32() function
+
+    float radians = 0.0f;
+    const float step = 0.01f;
+
+    // Use volatile to force GCC to execute every iteration
+    volatile float dummy_val = 0.0f;
+
+    radians = 0.0f;
+    uint64_t start_us = time_us_64();
+    for (uint32_t i = 0; i < (10 * TOTAL_CALCULATIONS); i++) {
+        dummy_val = cosf(radians);
+
+        radians += step;
+        if (radians >= 6.28318530718f)
+            radians = 0.0f;
+    }
+    uint32_t std_us = (uint32_t)(time_us_64() - start_us);
+
+    start_us = time_us_64();
+    radians = 0.0f;
+    for (uint32_t i = 0; i < (10 * TOTAL_CALCULATIONS); i++) {
+        dummy_val = arm_cos_f32(radians);
+        radians += step;
+        if (radians >= 6.28318530718f)
+            radians = 0.0f;
+    }
+    uint32_t cmsis_us = (uint32_t)(time_us_64() - start_us);
+
+    printf("Startup std cosf : %6.2f ms\n", std_us / 1000.0f);
+    printf("Startup CMSIS-DSP: %6.2f ms\n", cmsis_us / 1000.0f);
+
     // Launch core1_entry function on Core 1
     multicore_launch_core1(core1_entry);
 
     uint32_t now, next_blink = LED_DELAY, next_tick = TICK_DELAY;
-
-    float radians = 0.0f;
-    float std_cos_val = 0.0f;
-    const float step = 0.01f;
 
     // Main loop for Core 0
     while (true) {
@@ -197,7 +225,7 @@ int main() {
             for (uint32_t i = 0; i < TOTAL_CALCULATIONS; i++) {
 
                 // Run standard C cosf() function (software implementation)
-                std_cos_val = cosf(radians);
+                dummy_val = cosf(radians);
 
                 radians += step;
                 if (radians >= 6.28318530718f) {
@@ -208,7 +236,7 @@ int main() {
             uint32_t elapsed_us = (uint32_t)(time_us_64() - start_us);
 
             mutex_enter_blocking(&printf_mutex); // Ensure we've got exclusive access to printf
-            printf("Core 0 [std cosf]   tick %lu : %6.2f ms | Final rad = %.2f | cos = % .5f\n", now, elapsed_us / 1000.0f, radians, std_cos_val);
+            printf("Core 0 [std cosf]   tick %lu : %6.2f ms | Final rad = %.2f | cos = % .5f\n", now, elapsed_us / 1000.0f, radians, dummy_val);
             mutex_exit(&printf_mutex);
 
             next_tick = now + TICK_DELAY;

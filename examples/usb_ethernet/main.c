@@ -19,6 +19,7 @@
 #include "hardware/gpio.h"   // For GPIO control
 #include "hardware/timer.h"  // Required for hardware timer access
 #include "pico/stdlib.h"     // For sleep and stdio initialization
+#include "pico/unique_id.h"
 
 // Include standard I/O for printf
 #include <stdint.h>
@@ -27,6 +28,8 @@
 #include "dhcps.h"
 #include "tusb.h"
 
+#include "lwip/apps/fs.h"
+#include "lwip/apps/httpd.h"
 #include "lwip/dhcp.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
@@ -43,6 +46,9 @@ static volatile uint32_t systick = 0;
 volatile uint32_t blink_interval_ms = LED_DELAY;
 
 static struct netif netif_data;
+
+// Buffer to store generated HTML response
+static char http_response_buf[2048];
 
 /**
  * @brief Callback for the repeating timer.
@@ -67,6 +73,7 @@ void universal_tick_init() {
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
+    gpio_put(PICO_DEFAULT_LED_PIN, 1);            // Drive high immediately
     return PICO_OK;
 }
 
@@ -134,6 +141,113 @@ void tud_network_init_cb(void) {
     // Called when USB Network interface is initialized
 }
 
+/* Custom fs_open_custom handler for HTML shell and JSON APIs */
+int fs_open_custom(struct fs_file *file, const char *name) {
+
+    // --- LED TOGGLE ENDPOINT: /api/led/toggle ---
+    if (strcmp(name, "/api/led/toggle") == 0) {
+        pico_toggle_led(); // Perform action
+
+        int len = snprintf(http_response_buf, sizeof(http_response_buf), "{\"status\":\"ok\",\"led\":%d}", gpio_get(PICO_DEFAULT_LED_PIN));
+
+        memset(file, 0, sizeof(struct fs_file));
+        file->data = http_response_buf;
+        file->len = len;
+        file->index = len;
+        file->flags = FS_FILE_FLAGS_CUSTOM;
+        return 1;
+    }
+
+    // --- JSON API ENDPOINT: /api/stats ---
+    if (strcmp(name, "/api/stats") == 0) {
+        pico_unique_board_id_t id;
+        pico_get_unique_board_id(&id);
+
+        char id_str[2 * PICO_UNIQUE_BOARD_ID_SIZE_BYTES + 1];
+        pico_get_unique_board_id_string(id_str, sizeof(id_str));
+
+        uint32_t sys_clk_mhz = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) / 1000;
+        uint32_t uptime_sec = systick / 1000;
+
+        int len = snprintf(http_response_buf, sizeof(http_response_buf), "{"
+                                                                         "\"architecture\":\"%s\","
+                                                                         "\"clock_mhz\":%lu,"
+                                                                         "\"board_id\":\"%s\","
+                                                                         "\"uptime_seconds\":%lu"
+                                                                         "}",
+#ifdef __riscv
+                           "RISC-V (Hazard3)",
+#else
+                           "Arm Cortex-M33",
+#endif
+                           (unsigned long)sys_clk_mhz,
+                           id_str,
+                           (unsigned long)uptime_sec);
+
+        memset(file, 0, sizeof(struct fs_file));
+        file->data = http_response_buf;
+        file->len = len;
+        file->index = len;
+        file->flags = FS_FILE_FLAGS_CUSTOM;
+        return 1;
+    }
+
+    // --- HTML WEB PAGE: Dynamic Shell with LED Control Button ---
+    if (strcmp(name, "/index.html") == 0 || strcmp(name, "/") == 0) {
+        int len = snprintf(http_response_buf, sizeof(http_response_buf), "<!DOCTYPE html><html><head><title>RP2350 Info</title>"
+                                                                         "<style>"
+                                                                         "body{font-family:sans-serif;margin:40px;background:#1a1a1a;color:#eee}"
+                                                                         "h1{color:#e6005c}.card{background:#2a2a2a;padding:20px;border-radius:8px;"
+                                                                         "max-width:500px;box-shadow:0 4px 10px rgba(0,0,0,0.5)}"
+                                                                         "code{background:#333;padding:2px 6px;border-radius:4px;color:#00ffcc}"
+                                                                         "button{background:#e6005c;color:#fff;border:none;padding:10px 18px;"
+                                                                         "font-size:14px;border-radius:4px;cursor:pointer;margin-top:10px;font-weight:bold}"
+                                                                         "button:hover{background:#ff1a75}"
+                                                                         "</style>"
+                                                                         "<script>"
+                                                                         "async function updateStats(){"
+                                                                         "try{"
+                                                                         "let r = await fetch('/api/stats');"
+                                                                         "let d = await r.json();"
+                                                                         "document.getElementById('arch').innerText = d.architecture;"
+                                                                         "document.getElementById('clk').innerText = d.clock_mhz + ' MHz';"
+                                                                         "document.getElementById('id').innerText = d.board_id;"
+                                                                         "document.getElementById('up').innerText = d.uptime_seconds + ' s';"
+                                                                         "}catch(e){console.error(e);}"
+                                                                         "}"
+                                                                         "async function toggleLed(){"
+                                                                         "try{"
+                                                                         "await fetch('/api/led/toggle');"
+                                                                         "}catch(e){console.error(e);}"
+                                                                         "}"
+                                                                         "window.onload = () => {"
+                                                                         "updateStats();"
+                                                                         "setInterval(updateStats, 1000);"
+                                                                         "};"
+                                                                         "</script></head><body>"
+                                                                         "<div class='card'><h1>RP2350 System Info</h1>"
+                                                                         "<p><b>Architecture:</b> <span id='arch'>Loading...</span></p>"
+                                                                         "<p><b>System Clock:</b> <span id='clk'>Loading...</span></p>"
+                                                                         "<p><b>Unique Board ID:</b> <code id='id'>Loading...</code></p>"
+                                                                         "<p><b>System Uptime:</b> <span id='up'>Loading...</span></p>"
+                                                                         "<button onclick='toggleLed()'>Toggle LED</button>"
+                                                                         "</div></body></html>");
+
+        memset(file, 0, sizeof(struct fs_file));
+        file->data = http_response_buf;
+        file->len = len;
+        file->index = len;
+        file->flags = FS_FILE_FLAGS_CUSTOM;
+        return 1;
+    }
+
+    return 0; // Fallback for unhandled paths
+}
+
+void fs_close_custom(struct fs_file *file) {
+    (void)file;
+}
+
 /**
  * @brief Main entry point for Core 0.
  */
@@ -185,18 +299,24 @@ int main() {
     // Initialize DHCP Server!
     dhcps_init(&ipaddr, &netmask);
 
+    // Initialize HTTP Server
+    httpd_init();
+
     uint32_t now, loop_cnt = 0, next_blink = blink_interval_ms, next_tick = TICK_DELAY;
 
     while (true) {
 
         tud_task(); // tinyusb device task
 
+        // Service lwIP internal timers (CRITICAL for TCP connections)
+        sys_check_timeouts();
+
         now = systick;
 
-        if (now >= next_blink) {
-            pico_toggle_led();
-            next_blink = now + blink_interval_ms;
-        }
+        // if (now >= next_blink) {
+        //     pico_toggle_led();
+        //     next_blink = now + blink_interval_ms;
+        // }
 
         if (now >= next_tick) {
             printf("Core 0 tick %lu (loop = %lu)\n", now, loop_cnt);

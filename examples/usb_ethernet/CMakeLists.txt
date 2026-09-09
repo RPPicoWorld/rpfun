@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
+set(sdkVersion 2.3.1)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -80,6 +80,7 @@ target_link_libraries(main
     tinyusb_device 
     tinyusb_board
     pico_lwip_nosys
+    pico_lwip_http
 )
 
 pico_enable_stdio_uart(main 1)

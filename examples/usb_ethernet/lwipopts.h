@@ -21,5 +21,8 @@
 #define LWIP_TCP 1
 #define LWIP_UDP 1
 #define LWIP_DHCP 1
+#define LWIP_HTTPD 1
+#define LWIP_HTTPD_CUSTOM_FILES 1 // Allows dynamic page generation
+#define LWIP_HTTPD_DYNAMIC_HEADERS 1
 
 #endif // _LWIPOPTS_H_
