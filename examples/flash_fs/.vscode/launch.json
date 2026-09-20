@@ -22,7 +22,8 @@
             // Also works fine for flash binaries
             "overrideLaunchCommands": [
                 "monitor reset init",
-                "load \"${command:raspberry-pi-pico.launchTargetPath}\""
+                "load \"${command:raspberry-pi-pico.launchTargetPath}\"",
+                "monitor program \"${workspaceFolder}/build/littlefs.bin\" 0x10100000 verify"
             ],
             "openOCDLaunchCommands": [
                 "adapter speed 5000"
@@ -45,8 +46,9 @@
             // Also works fine for flash binaries
             "overrideLaunchCommands": [
                 "monitor reset init",
-                "load \"${command:raspberry-pi-pico.launchTargetPath}\""
+                "load \"${command:raspberry-pi-pico.launchTargetPath}\"",
+                "monitor program \"${workspaceFolder}/build/littlefs.bin\" 0x10100000 verify"
             ]
-        },
+        }
     ]
 }
