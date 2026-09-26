@@ -1,0 +1,33 @@
+.program i2s
+.side_set 1
+
+; Side-set pin 0 -> BCK (Bit Clock, GPIO 3)
+; OUT pin 0      -> SD  (Serial Data, GPIO 21)
+; SET pin 0      -> LRCK (Frame Clock, GPIO 24)
+
+public entry_point:
+    set pins, 0                side 0b0 ; LRCK Low (Left Channel), BCK Low
+    set x, 14                  side 0b0
+
+bitloop_left:
+    out pins, 1                side 0b1 ; Data bit, BCK High
+    jmp x-- bitloop_left       side 0b0 ; BCK Low
+
+    out pins, 1                side 0b1 ; Send 16th Left bit, BCK High
+    set pins, 1                side 0b0 ; LRCK High (Right Channel), BCK Low
+    set x, 14                  side 0b0
+
+bitloop_right:
+    out pins, 1                side 0b1 ; Data bit, BCK High
+    jmp x-- bitloop_right      side 0b0 ; BCK Low
+
+    out pins, 1                side 0b1 ; Send 16th Right bit, BCK High
+
+% c-sdk {
+static inline pio_sm_config i2s_config(uint offset) {
+    pio_sm_config c = pio_get_default_sm_config();
+    sm_config_set_wrap(&c, offset + i2s_wrap_target, offset + i2s_wrap);
+    sm_config_set_sideset(&c, 1, false, false);
+    return c;
+}
+%}
