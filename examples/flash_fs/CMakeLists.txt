@@ -124,7 +124,7 @@ else()
 endif()
 
 # Flash Filesystem Only via OpenOCD
-add_custom_target(openocd_flash_fs
+add_custom_target(flash_fs
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
         -c "adapter speed 5000"
@@ -135,7 +135,7 @@ add_custom_target(openocd_flash_fs
 )
 
 # Flash Main Firmware Only via OpenOCD
-add_custom_target(openocd_flash_main
+add_custom_target(flash_main
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
         -c "adapter speed 5000"
@@ -146,7 +146,7 @@ add_custom_target(openocd_flash_main
 )
 
 # Flash Everything (Main Firmware + LittleFS) via OpenOCD
-add_custom_target(openocd_flash_all
+add_custom_target(flash
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
         -c "adapter speed 5000"

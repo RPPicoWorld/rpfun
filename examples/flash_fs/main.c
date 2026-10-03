@@ -40,6 +40,46 @@ static lfs_t lfs;
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
 
+// Total uptime in seconds, incremented every 1000ms by the timer callback
+static volatile uint32_t uptime_seconds = 0;
+
+/**
+ * @brief Timer callback function to increment the systick counter.
+ *
+ * @param t Pointer to the repeating timer structure.
+ * @return bool True to continue the timer, false to stop it.
+ */
+bool on_timer_tick(struct repeating_timer *t) {
+    systick++;
+    return true;
+}
+
+/**
+ * @brief Initializes a repeating timer to increment the systick counter.
+ */
+void universal_tick_init() {
+    static struct repeating_timer timer;
+    // Negative delay means "measure from the start of the last callback"
+    // to avoid jitter. -1ms = 1000us frequency.
+    add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
+}
+
+/**
+ * @brief Initializes the onboard LED for output.
+ */
+int pico_led_init(void) {
+    gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
+    return PICO_OK;
+}
+
+/**
+ * @brief Toggles the state of the onboard LED.
+ */
+void pico_toggle_led() {
+    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
+}
+
 /**
  * @brief Updates the boot count stored in LittleFS.
  *
@@ -68,6 +108,50 @@ static void update_bootcount(void) {
     lfs_file_rewind(&lfs, &file);
     lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
     lfs_file_close(&lfs, &file);
+}
+
+/**
+ * @brief Measures the performance of writing and reading a 100KB file on LittleFS.
+ */
+void flash_performance(void) {
+
+    lfs_file_t file;
+    int err;
+    uint32_t start_time;
+    uint8_t buffer[256];
+
+    for (int i = 0; i < sizeof(buffer); ++i) {
+        buffer[i] = (uint8_t)i;
+    }
+
+    err = lfs_file_open(&lfs, &file, "big.dat", LFS_O_RDWR | LFS_O_CREAT | LFS_O_TRUNC);
+    if (err < 0) {
+        printf("Failed to open big.dat (err %d)\n", err);
+        return;
+    }
+
+    printf("Writing 100KB to big.dat...\n");
+    start_time = systick;
+    for (int i = 0; i < 4 * 100; ++i) {
+        lfs_file_write(&lfs, &file, buffer, sizeof(buffer));
+    }
+    lfs_file_close(&lfs, &file);
+
+    printf("Write completed in %lu ms\n", (unsigned long)(systick - start_time));
+
+    err = lfs_file_open(&lfs, &file, "big.dat", LFS_O_RDONLY);
+    if (err < 0) {
+        printf("Failed to open big.dat for reading (err %d)\n", err);
+        return;
+    }
+
+    printf("Reading 100KB from big.dat...\n");
+    start_time = systick;
+    for (int i = 0; i < 4 * 100; ++i) {
+        lfs_file_read(&lfs, &file, buffer, sizeof(buffer));
+    }
+    lfs_file_close(&lfs, &file);
+    printf("Read completed in %lu ms\n", (unsigned long)(systick - start_time));
 }
 
 /**
@@ -120,50 +204,10 @@ static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
 }
 
 /**
- * @brief Timer callback function to increment the systick counter.
- *
- * @param t Pointer to the repeating timer structure.
- * @return bool True to continue the timer, false to stop it.
- */
-bool on_timer_tick(struct repeating_timer *t) {
-    systick++;
-    return true;
-}
-
-/**
- * @brief Initializes a repeating timer to increment the systick counter.
- */
-void universal_tick_init() {
-    static struct repeating_timer timer;
-    // Negative delay means "measure from the start of the last callback"
-    // to avoid jitter. -1ms = 1000us frequency.
-    add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
-}
-
-/**
- * @brief Initializes the onboard LED for output.
- */
-int pico_led_init(void) {
-    gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
-    return PICO_OK;
-}
-
-/**
- * @brief Toggles the state of the onboard LED.
- */
-void pico_toggle_led() {
-    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
-}
-
-/**
  * @brief Main function.
  * @return int Return code.
  */
 int main() {
-
-    int rc = pico_led_init();
-    hard_assert(rc == PICO_OK);
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -194,7 +238,6 @@ int main() {
         printf("LittleFS mounted successfully!\n");
         list_lfs_directory(&lfs, "/");
         dump_lfs_file(&lfs, "dummy.txt");
-        run_speed_test(&lfs);
     } else {
         // printf("Failed to mount LittleFS!\n");
         panic("Fatal Error: Failed to mount LittleFS!\n");
@@ -203,7 +246,10 @@ int main() {
     // If we get here, we have successfully mounted the filesystem and performed our operations.
     update_bootcount();
 
-    universal_tick_init(); // Start the universal tick timer
+    init_total_uptime();
+
+    // Measure the performance of writing and reading a 100KB file on LittleFS
+    flash_performance();
 
     uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
 
