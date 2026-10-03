@@ -12,9 +12,9 @@ pico_board_cmake_set(PICO_PLATFORM, rp2350)
 #define PICO_FLASH_SIZE_BYTES (2 * 1024 * 1024)
 #endif
 
-// Based on schematic: Pin 39 (PC13) -> GPIO 37
+// Based on schematic: GPIO 31
 #ifndef PICO_DEFAULT_LED_PIN
-#define PICO_DEFAULT_LED_PIN 37
+#define PICO_DEFAULT_LED_PIN 31
 #endif
 
 // --- UART ---
@@ -26,6 +26,25 @@ pico_board_cmake_set(PICO_PLATFORM, rp2350)
 #endif
 #ifndef PICO_DEFAULT_UART_RX_PIN
 #define PICO_DEFAULT_UART_RX_PIN 1
+#endif
+
+// --- I2C 0 (Default I2C) ---
+#ifndef PICO_DEFAULT_I2C
+#define PICO_DEFAULT_I2C 0
+#endif
+#ifndef PICO_DEFAULT_I2C_SDA_PIN
+#define PICO_DEFAULT_I2C_SDA_PIN 8
+#endif
+#ifndef PICO_DEFAULT_I2C_SCL_PIN
+#define PICO_DEFAULT_I2C_SCL_PIN 9
+#endif
+
+// --- I2C 1 ---
+#ifndef PICO_DEFAULT_I2C1_SDA_PIN
+#define PICO_DEFAULT_I2C1_SDA_PIN 2
+#endif
+#ifndef PICO_DEFAULT_I2C1_SCL_PIN
+#define PICO_DEFAULT_I2C1_SCL_PIN 3
 #endif
 
 #endif // _BOARDS_SL_MCU_RP2354_H

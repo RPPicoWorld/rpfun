@@ -12,7 +12,7 @@ pico_board_cmake_set(PICO_PLATFORM, rp2350)
 #define PICO_FLASH_SIZE_BYTES (2 * 1024 * 1024)
 #endif
 
-// Based on schematic: Pin 39 (PC13) -> GPIO 37
+// Based on schematic: Pin 39 (PC13) -> GPIO 31
 #ifndef PICO_DEFAULT_LED_PIN
 #define PICO_DEFAULT_LED_PIN 37
 #endif

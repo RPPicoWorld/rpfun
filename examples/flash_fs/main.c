@@ -1,44 +1,79 @@
 /**
  * @file main.c
- * @brief Using the can2040 library to demonstrate CAN bus functionality on the RP2040, along with a simple LED blink and tick example.
+ * @brief Maintaining a LittleFS on RP2350 flash
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Receive and send CAN messages using the can2040 library on the RP2040. This example demonstrates how to set
- * up the CAN bus, handle incoming messages, and transmit messages. It also includes a simple LED blink and
- * tick example to show that the program is running.
+ * Maintains a LittleFS filesystem on the RP2350 flash memory. The program initializes the LittleFS, mounts it,
+ * lists the root directory, and dumps the contents of a specified file.
+ * It also toggles the onboard LED at regular intervals and prints tick information to the console.
  *
  */
 
 // Include necessary headers from the Pico SDK
 #include "hardware/clocks.h" // For clock frequency information
-#include "hardware/dma.h"    // For DMA access (if needed)
-#include "hardware/gpio.h"   // For GPIO control
-#include "hardware/timer.h"  // Required for hardware timer access
-#include "hardware/vreg.h"   // Needed for voltage scaling
-#include "pico/multicore.h"  // For multicore support
+#include "hardware/dma.h"    // For DMA operations
+#include "hardware/gpio.h"   // For GPIO control (LED)
+#include "hardware/timer.h"  // For timer operations
+#include "hardware/vreg.h"   // For voltage regulator control
+#include "pico/multicore.h"  // For multicore operations
 #include "pico/rand.h"       // For random number generation
-#include "pico/stdlib.h"     // For sleep and stdio initialization
+#include "pico/stdlib.h"     // For standard I/O and sleep functions
 
-// Include standard I/O for printf
+// Include Standard C headers
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+// Include LittleFS headers
 #include "lfs_port.h"
 
-#define LED_DELAY 500   // LED blink delay in milliseconds
-#define TICK_DELAY 1000 // Tick delay in milliseconds
+// Define constants for LED and tick delays
+#define LED_DELAY 500
+#define TICK_DELAY 1000
 
+// Declare a static instance of the LittleFS structure and a volatile variable for system ticks
 static lfs_t lfs;
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
 
 /**
- * @brief List all directory entries in root to diagnose available files.
+ * @brief Updates the boot count stored in LittleFS.
+ *
+ * Reads the 32-bit boot count from 'bootcnt.dat', prints the current value,
+ * increments it by 1, and writes it back to the filesystem.
+ */
+static void update_bootcount(void) {
+    lfs_file_t file;
+    uint32_t boot_count = 0;
+
+    int err = lfs_file_open(&lfs, &file, "bootcnt.dat", LFS_O_RDWR | LFS_O_CREAT);
+    if (err < 0) {
+        printf("Failed to open bootcnt.dat (err %d)\n", err);
+        return;
+    }
+
+    lfs_ssize_t read_bytes = lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+    if (read_bytes != sizeof(boot_count)) {
+        boot_count = 0;
+    }
+
+    printf("Boot count: %lu\n", (unsigned long)boot_count);
+
+    boot_count++;
+
+    lfs_file_rewind(&lfs, &file);
+    lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+    lfs_file_close(&lfs, &file);
+}
+
+/**
+ * @brief Lists the contents of a directory in the LittleFS.
+ * @param lfs_ptr Pointer to the LittleFS instance.
+ * @param path The path of the directory to list.
  */
 static void list_lfs_directory(lfs_t *lfs_ptr, const char *path) {
     lfs_dir_t dir;
@@ -60,7 +95,9 @@ static void list_lfs_directory(lfs_t *lfs_ptr, const char *path) {
 }
 
 /**
- * @brief Dump the contents of a file from LittleFS to stdout.
+ * @brief Initializes the LittleFS on the RP2350 flash.
+ * @param lfs Pointer to the LittleFS instance to initialize.
+ * @return int Returns 0 on success, or a negative error code on failure.
  */
 static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
     lfs_file_t file;
@@ -83,103 +120,18 @@ static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
 }
 
 /**
- * @brief Reads, increments, and updates the boot count in 'bootcount.dat'.
- */
-static void update_boot_count(lfs_t *lfs_ptr) {
-    lfs_file_t file;
-    uint32_t boot_count = 0;
-
-    // Read current boot count if file exists
-    int err = lfs_file_open(lfs_ptr, &file, "bootcount.dat", LFS_O_RDONLY);
-    if (err == LFS_ERR_OK) {
-        lfs_file_read(lfs_ptr, &file, &boot_count, sizeof(boot_count));
-        lfs_file_close(lfs_ptr, &file);
-    }
-
-    boot_count++;
-
-    // Write back updated boot count
-    err = lfs_file_open(lfs_ptr, &file, "bootcount.dat", LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC);
-    if (err == LFS_ERR_OK) {
-        lfs_file_write(lfs_ptr, &file, &boot_count, sizeof(boot_count));
-        lfs_file_close(lfs_ptr, &file);
-        printf("Boot count: %lu\n", (unsigned long)boot_count);
-    } else {
-        printf("Failed to update 'bootcount.dat' (err %d)\n", err);
-    }
-}
-
-/**
- * @brief Performs a 512 kB write and read speed test using 'big.dat'.
- * Overwrites 'big.dat' if it already exists, timed via the systick millisecond counter.
- */
-static void run_speed_test(lfs_t *lfs_ptr) {
-    lfs_file_t file;
-    static uint8_t chunk_buf[4096];       // 4 kB buffer matching LittleFS block size
-    const size_t total_size = 256 * 1024; // 512 kB
-    const size_t chunk_size = sizeof(chunk_buf);
-    const size_t chunks = total_size / chunk_size;
-
-    memset(chunk_buf, 0xAA, chunk_size);
-
-    printf("--- LittleFS Speed Test (256 kB) ---\n");
-
-    // 1. Write Benchmark (LFS_O_CREAT | LFS_O_TRUNC forces overwrite if big.dat exists)
-    uint32_t start_ms = systick;
-    int err = lfs_file_open(lfs_ptr, &file, "big.dat", LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC);
-    if (err < 0) {
-        printf("Failed to open 'big.dat' for writing (err %d)\n", err);
-        return;
-    }
-
-    for (size_t i = 0; i < chunks; i++) {
-        lfs_ssize_t written = lfs_file_write(lfs_ptr, &file, chunk_buf, chunk_size);
-        if (written < 0) {
-            printf("Write failed on chunk %zu (err %ld)\n", i, (long)written);
-            lfs_file_close(lfs_ptr, &file);
-            return;
-        }
-    }
-    lfs_file_close(lfs_ptr, &file);
-    uint32_t write_time_ms = systick - start_ms;
-
-    double write_sec = (double)write_time_ms / 1000.0;
-    double write_kbps = (write_sec > 0.0) ? ((double)(total_size / 1024) / write_sec) : 0.0;
-    printf("Write: %zu kB written in %lu ms (%.2f kB/s)\n", total_size / 1024, (unsigned long)write_time_ms, write_kbps);
-
-    // 2. Read Benchmark
-    start_ms = systick;
-    err = lfs_file_open(lfs_ptr, &file, "big.dat", LFS_O_RDONLY);
-    if (err < 0) {
-        printf("Failed to open 'big.dat' for reading (err %d)\n", err);
-        return;
-    }
-
-    size_t total_read = 0;
-    lfs_ssize_t read_bytes;
-    while ((read_bytes = lfs_file_read(lfs_ptr, &file, chunk_buf, chunk_size)) > 0) {
-        total_read += read_bytes;
-    }
-    lfs_file_close(lfs_ptr, &file);
-    uint32_t read_time_ms = systick - start_ms;
-
-    double read_sec = (double)read_time_ms / 1000.0;
-    double read_kbps = (read_sec > 0.0) ? ((double)(total_read / 1024) / read_sec) : 0.0;
-    printf("Read:  %zu kB read in %lu ms (%.2f kB/s)\n", total_read / 1024, (unsigned long)read_time_ms, read_kbps);
-    printf("--- End of Speed Test ---\n");
-}
-
-/**
- * @brief Callback for the repeating timer.
- * Works on both ARM and RISC-V.
+ * @brief Timer callback function to increment the systick counter.
+ *
+ * @param t Pointer to the repeating timer structure.
+ * @return bool True to continue the timer, false to stop it.
  */
 bool on_timer_tick(struct repeating_timer *t) {
     systick++;
-    return true; // Keep the timer running
+    return true;
 }
 
 /**
- * @brief Universal tick initialization using the SDK timer pool.
+ * @brief Initializes a repeating timer to increment the systick counter.
  */
 void universal_tick_init() {
     static struct repeating_timer timer;
@@ -189,8 +141,7 @@ void universal_tick_init() {
 }
 
 /**
- * @brief Initializes the default LED GPIO pin.
- * @return PICO_OK on success, error code on failure.
+ * @brief Initializes the onboard LED for output.
  */
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
@@ -199,16 +150,20 @@ int pico_led_init(void) {
 }
 
 /**
- * @brief Toggles the state of the default LED.
+ * @brief Toggles the state of the onboard LED.
  */
 void pico_toggle_led() {
     gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
 }
 
 /**
- * @brief Main entry point for Core 0.
+ * @brief Main function.
+ * @return int Return code.
  */
 int main() {
+
+    int rc = pico_led_init();
+    hard_assert(rc == PICO_OK);
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -237,13 +192,18 @@ int main() {
     // Mount LittleFS partition at offset 0x10100000
     if (lfs_port_init(&lfs) == 0) {
         printf("LittleFS mounted successfully!\n");
-        update_boot_count(&lfs);
         list_lfs_directory(&lfs, "/");
         dump_lfs_file(&lfs, "dummy.txt");
         run_speed_test(&lfs);
     } else {
-        printf("Failed to mount LittleFS!\n");
+        // printf("Failed to mount LittleFS!\n");
+        panic("Fatal Error: Failed to mount LittleFS!\n");
     }
+
+    // If we get here, we have successfully mounted the filesystem and performed our operations.
+    update_bootcount();
+
+    universal_tick_init(); // Start the universal tick timer
 
     uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
 

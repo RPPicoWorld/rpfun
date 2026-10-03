@@ -1,0 +1,13 @@
+/* Custom memory_flash.incl */
+MEMORY
+{
+    /* Truncate application FLASH to 1MB (0x100000) so linker stops you if code overlaps FS */
+    FLASH(rx) : ORIGIN = 0x10000000, LENGTH = 1024k
+    
+    /* Dedicated FS region (accessible via linker symbols) */
+    FLASH_FS(r) : ORIGIN = 0x10100000, LENGTH = 1024k
+}
+
+__flash_fs_start = ORIGIN(FLASH_FS);
+__flash_fs_length = LENGTH(FLASH_FS);
+__flash_fs_offset = ORIGIN(FLASH_FS) - ORIGIN(FLASH);

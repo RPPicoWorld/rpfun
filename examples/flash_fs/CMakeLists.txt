@@ -38,6 +38,8 @@ add_executable(main
     littlefs/lfs_util.c
 )
 
+pico_add_linker_script_override_path(main "${CMAKE_CURRENT_SOURCE_DIR}/linker_overrides")
+
 get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
 find_program(CMAKE_SIZE_UTIL arm-none-eabi-size HINTS ${TOOLCHAIN_BIN_DIR})
 
@@ -69,7 +71,7 @@ target_link_libraries(main
 pico_enable_stdio_uart(main 1)
 
 # ====================================================================
-# BUILD LITTLEFS BINARY ONLY (NO EMBEDDING / NO LINKER MERGING)
+# BUILD LITTLEFS BINARY 
 # ====================================================================
 find_program(MKLITTLEFS_EXEC mklittlefs)
 
@@ -97,16 +99,19 @@ pico_add_extra_outputs(main)
 # OPENOCD FLASH TARGETS (USING PICO SDK INSTALL)
 # ====================================================================
 
-# Resolve OpenOCD executable and scripts directory from Pico SDK
 if(DEFINED ENV{PICO_OPENOCD_PATH})
     set(OPENOCD_BIN "$ENV{PICO_OPENOCD_PATH}/bin/openocd")
     set(OPENOCD_SCRIPTS "$ENV{PICO_OPENOCD_PATH}/scripts")
 else()
     set(OPENOCD_BIN "${USERHOME}/.pico-sdk/openocd/0.12.0+dev/openocd")
-    set(OPENOCD_SCRIPTS "${USERHOME}/.pico-sdk/openocd/0.12.0+pico/scripts")
+    
+    if(EXISTS "${USERHOME}/.pico-sdk/openocd/0.12.0+dev/scripts")
+        set(OPENOCD_SCRIPTS "${USERHOME}/.pico-sdk/openocd/0.12.0+dev/scripts")
+    else()
+        set(OPENOCD_SCRIPTS "${USERHOME}/.pico-sdk/openocd/0.12.0+pico/scripts")
+    endif()
 endif()
 
-# Fall back to system openocd if SDK paths don't exist
 if(NOT EXISTS ${OPENOCD_BIN})
     find_program(OPENOCD_BIN openocd)
     set(OPENOCD_SCRIPTS "")
@@ -118,31 +123,34 @@ else()
     set(OPENOCD_SEARCH_ARGS "")
 endif()
 
-# 1. Flash Filesystem Only via OpenOCD
+# Flash Filesystem Only via OpenOCD
 add_custom_target(openocd_flash_fs
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
-        -f target/rp2350-arm.cfg
+        -c "adapter speed 5000"
+        -f target/rp2350.cfg
         -c "program ${FS_BIN} 0x10100000 verify reset exit"
     DEPENDS generate_littlefs
     COMMENT "Flashing littlefs.bin to 0x10100000 via OpenOCD..."
 )
 
-# 2. Flash Main Firmware Only via OpenOCD
+# Flash Main Firmware Only via OpenOCD
 add_custom_target(openocd_flash_main
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
-        -f target/rp2350-arm.cfg
+        -c "adapter speed 5000"
+        -f target/rp2350.cfg
         -c "program $<TARGET_FILE:main> verify reset exit"
     DEPENDS main
     COMMENT "Flashing main.elf via OpenOCD..."
 )
 
-# 3. Flash Everything (Main Firmware + LittleFS) via OpenOCD
+# Flash Everything (Main Firmware + LittleFS) via OpenOCD
 add_custom_target(openocd_flash_all
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
         -f interface/cmsis-dap.cfg
-        -f target/rp2350-arm.cfg
+        -c "adapter speed 5000"
+        -f target/rp2350.cfg
         -c "program $<TARGET_FILE:main> verify"
         -c "program ${FS_BIN} 0x10100000 verify reset exit"
     DEPENDS main generate_littlefs
