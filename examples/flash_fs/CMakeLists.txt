@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Initialise pico_sdk from installed location
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
     set(USERHOME $ENV{USERPROFILE})
 else()
@@ -19,6 +19,7 @@ set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
+# ====================================================================================
 
 set(PICO_PLATFORM rp2350)
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_SOURCE_DIR}/boards/include" CACHE STRING "Extra board header dirs")
@@ -45,7 +46,7 @@ add_custom_command(TARGET main POST_BUILD
 )
 
 target_compile_options(main PRIVATE
-    -O3
+    -Og
     -ffunction-sections 
     -fdata-sections
 )
@@ -140,7 +141,7 @@ add_custom_target(openocd_flash_main
 # 3. Flash Everything (Main Firmware + LittleFS) via OpenOCD
 add_custom_target(openocd_flash_all
     COMMAND ${OPENOCD_BIN} ${OPENOCD_SEARCH_ARGS}
-        -f interface/cmsis-dap.cfgd
+        -f interface/cmsis-dap.cfg
         -f target/rp2350-arm.cfg
         -c "program $<TARGET_FILE:main> verify"
         -c "program ${FS_BIN} 0x10100000 verify reset exit"

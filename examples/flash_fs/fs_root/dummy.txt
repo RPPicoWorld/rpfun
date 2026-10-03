@@ -1,1 +1,2 @@
-This is a dummy
+This is a dummy with more text.
+And multiple lines.
