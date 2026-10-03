@@ -14,7 +14,7 @@ pico_board_cmake_set(PICO_PLATFORM, rp2350)
 
 // Based on schematic: Pin 39 (PC13) -> GPIO 31
 #ifndef PICO_DEFAULT_LED_PIN
-#define PICO_DEFAULT_LED_PIN 31
+#define PICO_DEFAULT_LED_PIN 37
 #endif
 
 // --- UART ---

@@ -1,23 +1,77 @@
-#include "hardware/clocks.h"
-#include "hardware/dma.h"
-#include "hardware/gpio.h"
-#include "hardware/timer.h"
-#include "hardware/vreg.h"
-#include "pico/multicore.h"
-#include "pico/rand.h"
-#include "pico/stdlib.h"
+/**
+ * @file main.c
+ * @brief Maintaining a LittleFS on RP2350 flash
+ * @author STM32World <lth@stm32world.com>
+ * @date 2026
+ *
+ * Copyright (c) 2026 STM32World <lth@stm32world.com>
+ *
+ * Maintains a LittleFS filesystem on the RP2350 flash memory. The program initializes the LittleFS, mounts it,
+ * lists the root directory, and dumps the contents of a specified file.
+ * It also toggles the onboard LED at regular intervals and prints tick information to the console.
+ *
+ */
 
+// Include necessary headers from the Pico SDK
+#include "hardware/clocks.h" // For clock frequency information
+#include "hardware/dma.h"    // For DMA operations
+#include "hardware/gpio.h"   // For GPIO control (LED)
+#include "hardware/timer.h"  // For timer operations
+#include "hardware/vreg.h"   // For voltage regulator control
+#include "pico/multicore.h"  // For multicore operations
+#include "pico/rand.h"       // For random number generation
+#include "pico/stdlib.h"     // For standard I/O and sleep functions
+
+// Include Standard C headers
 #include <stdint.h>
 #include <stdio.h>
 
+// Include LittleFS headers
 #include "lfs_port.h"
 
+// Define constants for LED and tick delays
 #define LED_DELAY 500
 #define TICK_DELAY 1000
 
+// Declare a static instance of the LittleFS structure and a volatile variable for system ticks
 static lfs_t lfs;
 static volatile uint32_t systick = 0;
 
+/**
+ * @brief Updates the boot count stored in LittleFS.
+ *
+ * Reads the 32-bit boot count from 'bootcnt.dat', prints the current value,
+ * increments it by 1, and writes it back to the filesystem.
+ */
+static void update_bootcount(void) {
+    lfs_file_t file;
+    uint32_t boot_count = 0;
+
+    int err = lfs_file_open(&lfs, &file, "bootcnt.dat", LFS_O_RDWR | LFS_O_CREAT);
+    if (err < 0) {
+        printf("Failed to open bootcnt.dat (err %d)\n", err);
+        return;
+    }
+
+    lfs_ssize_t read_bytes = lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+    if (read_bytes != sizeof(boot_count)) {
+        boot_count = 0;
+    }
+
+    printf("Boot count: %lu\n", (unsigned long)boot_count);
+
+    boot_count++;
+
+    lfs_file_rewind(&lfs, &file);
+    lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+    lfs_file_close(&lfs, &file);
+}
+
+/**
+ * @brief Lists the contents of a directory in the LittleFS.
+ * @param lfs_ptr Pointer to the LittleFS instance.
+ * @param path The path of the directory to list.
+ */
 static void list_lfs_directory(lfs_t *lfs_ptr, const char *path) {
     lfs_dir_t dir;
     struct lfs_info info;
@@ -37,6 +91,11 @@ static void list_lfs_directory(lfs_t *lfs_ptr, const char *path) {
     lfs_dir_close(lfs_ptr, &dir);
 }
 
+/**
+ * @brief Initializes the LittleFS on the RP2350 flash.
+ * @param lfs Pointer to the LittleFS instance to initialize.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
 static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
     lfs_file_t file;
     int err = lfs_file_open(lfs_ptr, &file, path, LFS_O_RDONLY);
@@ -57,27 +116,47 @@ static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
     lfs_file_close(lfs_ptr, &file);
 }
 
+/**
+ * @brief Timer callback function to increment the systick counter.
+ *
+ * @param t Pointer to the repeating timer structure.
+ * @return bool True to continue the timer, false to stop it.
+ */
 bool on_timer_tick(struct repeating_timer *t) {
     systick++;
     return true;
 }
 
+/**
+ * @brief Initializes a repeating timer to increment the systick counter.
+ */
 void universal_tick_init() {
     static struct repeating_timer timer;
     add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
 }
 
+/**
+ * @brief Initializes the onboard LED for output.
+ */
 int pico_led_init(void) {
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     return PICO_OK;
 }
 
+/**
+ * @brief Toggles the state of the onboard LED.
+ */
 void pico_toggle_led() {
     gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
 }
 
+/**
+ * @brief Main function.
+ * @return int Return code.
+ */
 int main() {
+
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
 
@@ -96,13 +175,18 @@ int main() {
 
     if (lfs_port_init(&lfs) == 0) {
         printf("LittleFS mounted successfully!\n");
+
         list_lfs_directory(&lfs, "/");
         dump_lfs_file(&lfs, "dummy.txt");
     } else {
-        printf("Failed to mount LittleFS!\n");
+        // printf("Failed to mount LittleFS!\n");
+        panic("Fatal Error: Failed to mount LittleFS!\n");
     }
 
-    universal_tick_init();
+    // If we get here, we have successfully mounted the filesystem and performed our operations.
+    update_bootcount();
+
+    universal_tick_init(); // Start the universal tick timer
 
     uint32_t now, loop_cnt = 0, next_blink = LED_DELAY, next_tick = TICK_DELAY;
 
@@ -124,3 +208,5 @@ int main() {
         tight_loop_contents();
     }
 }
+
+// vim: set ts=4 et nowrap

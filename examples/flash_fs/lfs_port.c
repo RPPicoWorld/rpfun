@@ -1,15 +1,25 @@
+/**
+ * @file lfs_port.c
+ * @brief LittleFS port for RP2350 flash.
+ */
+
 #include "lfs_port.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
 #include <string.h>
 
-// Flash base offset: 1MB from start of flash (0x10000000 + 0x00100000 = 0x10100000)
-#define FS_FLASH_OFFSET (1024 * 1024)
+// Import symbols exported directly from the linker script (memory_flash.incl)
+extern char __flash_fs_offset[];
+extern char __flash_fs_length[];
+
+// Calculate address offsets and total flash size from linker symbols
+#define FS_FLASH_OFFSET ((uint32_t)(uintptr_t)__flash_fs_offset)
+#define FS_FLASH_SIZE ((uint32_t)(uintptr_t)__flash_fs_length)
+
 #define FS_BLOCK_SIZE 4096
 #define FS_READ_SIZE 256
 #define FS_PROG_SIZE 256
-#define FS_BLOCK_COUNT 256 // 1MB total size
 
 static int lfs_pico_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *buffer, lfs_size_t size) {
     uint32_t flash_addr = XIP_BASE + FS_FLASH_OFFSET + (block * c->block_size) + off;
@@ -47,12 +57,14 @@ static struct lfs_config cfg = {
     .read_size = FS_READ_SIZE,
     .prog_size = FS_PROG_SIZE,
     .block_size = FS_BLOCK_SIZE,
-    .block_count = FS_BLOCK_COUNT,
-    .cache_size = FS_READ_SIZE,
-    .lookahead_size = 32,
     .block_cycles = 500,
 };
 
 int lfs_port_init(lfs_t *lfs) {
+    // Derive block count dynamically from linker script length symbol
+    cfg.block_count = FS_FLASH_SIZE / FS_BLOCK_SIZE;
+    cfg.cache_size = FS_READ_SIZE;
+    cfg.lookahead_size = 32;
+
     return lfs_mount(lfs, &cfg);
 }

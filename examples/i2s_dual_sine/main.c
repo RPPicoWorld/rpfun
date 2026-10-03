@@ -58,9 +58,6 @@
 // Mutex for synchronizing access to printf and sample rate changes
 auto_init_mutex(printf_mutex);
 
-volatile uint16_t internal_temp_raw = 0;
-volatile float internal_temp_c = 0.0f;
-
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
 
@@ -115,8 +112,6 @@ int16_t i2s_dma_buffer[I2S_DMA_BUFFER_SIZE];
  * DMA interrupt and Core 1.
  */
 int16_t *volatile dma_buffer_to_fill = NULL;
-
-float amplification_change = -0.01;
 
 PIO pio_instance = pio0;
 uint sm_instance = 0;
@@ -409,8 +404,6 @@ void core1_entry() {
         if (dma_buffer_to_fill != NULL) {
             int16_t *buf = dma_buffer_to_fill;
             dma_buffer_to_fill = NULL; // Acknowledge request immediately
-
-            __dmb(); // Force write visibility across bus
 
             if (buf) {
                 process_buffer(buf);
