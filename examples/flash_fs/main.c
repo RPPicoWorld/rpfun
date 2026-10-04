@@ -34,6 +34,11 @@
 #define LED_DELAY 500
 #define TICK_DELAY 1000
 
+// Define file names for boot count, uptime, and performance testing
+const char *bootcnt_file = "bootcnt.dat"; // File to store boot count
+const char *uptime_file = "uptime.dat";   // File to store total uptime
+const char *big_file = "big.dat";         // File to test read/write performance
+
 // Declare a static instance of the LittleFS structure and a volatile variable for system ticks
 static lfs_t lfs;
 
@@ -41,7 +46,7 @@ static lfs_t lfs;
 static volatile uint32_t systick = 0;
 
 // Total uptime in seconds, incremented every 1000ms by the timer callback
-static volatile uint32_t uptime_seconds = 0;
+static volatile uint32_t total_uptime = 0;
 
 /**
  * @brief Timer callback function to increment the systick counter.
@@ -90,7 +95,7 @@ static void update_bootcount(void) {
     lfs_file_t file;
     uint32_t boot_count = 0;
 
-    int err = lfs_file_open(&lfs, &file, "bootcnt.dat", LFS_O_RDWR | LFS_O_CREAT);
+    int err = lfs_file_open(&lfs, &file, bootcnt_file, LFS_O_RDWR | LFS_O_CREAT);
     if (err < 0) {
         printf("Failed to open bootcnt.dat (err %d)\n", err);
         return;
@@ -110,6 +115,38 @@ static void update_bootcount(void) {
     lfs_file_close(&lfs, &file);
 }
 
+void init_total_uptime(void) {
+    lfs_file_t file;
+
+    int err = lfs_file_open(&lfs, &file, uptime_file, LFS_O_RDWR | LFS_O_CREAT);
+    if (err < 0) {
+        printf("Failed to open uptime.dat (err %d)\n", err);
+        return;
+    }
+
+    lfs_ssize_t read_bytes = lfs_file_read(&lfs, &file, &total_uptime, sizeof(total_uptime));
+    if (read_bytes != sizeof(total_uptime)) {
+        total_uptime = 0;
+    }
+
+    printf("Total uptime: %lu seconds\n", (unsigned long)total_uptime);
+
+    lfs_file_close(&lfs, &file);
+}
+
+void update_total_uptime(void) {
+    lfs_file_t file;
+
+    int err = lfs_file_open(&lfs, &file, uptime_file, LFS_O_RDWR | LFS_O_CREAT);
+    if (err < 0) {
+        printf("Failed to open %s (err %d)\n", uptime_file, err);
+        return;
+    }
+
+    lfs_file_write(&lfs, &file, &total_uptime, sizeof(total_uptime));
+    lfs_file_close(&lfs, &file);
+}
+
 /**
  * @brief Measures the performance of writing and reading a 100KB file on LittleFS.
  */
@@ -124,13 +161,13 @@ void flash_performance(void) {
         buffer[i] = (uint8_t)i;
     }
 
-    err = lfs_file_open(&lfs, &file, "big.dat", LFS_O_RDWR | LFS_O_CREAT | LFS_O_TRUNC);
+    err = lfs_file_open(&lfs, &file, big_file, LFS_O_RDWR | LFS_O_CREAT | LFS_O_TRUNC);
     if (err < 0) {
-        printf("Failed to open big.dat (err %d)\n", err);
+        printf("Failed to open %s (err %d)\n", big_file, err);
         return;
     }
 
-    printf("Writing 100KB to big.dat...\n");
+    printf("Writing 100KB to %s...\n", big_file);
     start_time = systick;
     for (int i = 0; i < 4 * 100; ++i) {
         lfs_file_write(&lfs, &file, buffer, sizeof(buffer));
@@ -139,13 +176,13 @@ void flash_performance(void) {
 
     printf("Write completed in %lu ms\n", (unsigned long)(systick - start_time));
 
-    err = lfs_file_open(&lfs, &file, "big.dat", LFS_O_RDONLY);
+    err = lfs_file_open(&lfs, &file, big_file, LFS_O_RDONLY);
     if (err < 0) {
-        printf("Failed to open big.dat for reading (err %d)\n", err);
+        printf("Failed to open %s for reading (err %d)\n", big_file, err);
         return;
     }
 
-    printf("Reading 100KB from big.dat...\n");
+    printf("Reading 100KB from %s...\n", big_file);
     start_time = systick;
     for (int i = 0; i < 4 * 100; ++i) {
         lfs_file_read(&lfs, &file, buffer, sizeof(buffer));
@@ -246,6 +283,7 @@ int main() {
     // If we get here, we have successfully mounted the filesystem and performed our operations.
     update_bootcount();
 
+    // Initialize total uptime from the filesystem
     init_total_uptime();
 
     // Measure the performance of writing and reading a 100KB file on LittleFS
@@ -260,13 +298,21 @@ int main() {
 
         if (now >= next_blink) {
             pico_toggle_led();
-            next_blink = now + LED_DELAY;
+            next_blink += LED_DELAY;
         }
 
         if (now >= next_tick) {
-            printf("RP tick %lu (loop = %lu)\n", now / 1000, loop_cnt);
+
+            ++total_uptime;
+
+            printf("RP tick %lu (loop = %lu total = %lu)\n", now / 1000, loop_cnt, total_uptime);
+
+            if (next_tick % 10000 == 0) {
+                update_total_uptime();
+            }
+
             loop_cnt = 0;
-            next_tick = now + TICK_DELAY;
+            next_tick += TICK_DELAY;
         }
 
         ++loop_cnt;

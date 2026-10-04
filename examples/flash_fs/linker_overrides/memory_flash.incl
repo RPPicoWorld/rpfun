@@ -11,3 +11,4 @@ MEMORY
 __flash_fs_start = ORIGIN(FLASH_FS);
 __flash_fs_length = LENGTH(FLASH_FS);
 __flash_fs_offset = ORIGIN(FLASH_FS) - ORIGIN(FLASH);
+ 
