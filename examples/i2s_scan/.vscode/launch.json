@@ -26,7 +26,12 @@
             ],
             "openOCDLaunchCommands": [
                 "adapter speed 5000"
-            ]
+            ], 
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 10
+            }
+
         },
         {
             "name": "Pico Debug (Cortex-Debug with external OpenOCD)",
@@ -46,7 +51,11 @@
             "overrideLaunchCommands": [
                 "monitor reset init",
                 "load \"${command:raspberry-pi-pico.launchTargetPath}\""
-            ]
+            ], 
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
         },
     ]
 }

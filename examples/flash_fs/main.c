@@ -13,14 +13,17 @@
  */
 
 // Include necessary headers from the Pico SDK
-#include "hardware/clocks.h" // For clock frequency information
-#include "hardware/dma.h"    // For DMA operations
-#include "hardware/gpio.h"   // For GPIO control (LED)
-#include "hardware/timer.h"  // For timer operations
-#include "hardware/vreg.h"   // For voltage regulator control
-#include "pico/multicore.h"  // For multicore operations
-#include "pico/rand.h"       // For random number generation
-#include "pico/stdlib.h"     // For standard I/O and sleep functions
+#include "hardware/clocks.h"      // For clock frequency information
+#include "hardware/dma.h"         // For DMA operations
+#include "hardware/flash.h"       // For flash timing / cache helpers
+#include "hardware/gpio.h"        // For GPIO control (LED)
+#include "hardware/structs/qmi.h" // Register definitions for QMI clock divisor
+#include "hardware/timer.h"       // For timer operations
+#include "hardware/vreg.h"        // For voltage regulator control
+#include "pico/bootrom.h"         // For rom_flash_enter_cmd_xip
+#include "pico/multicore.h"       // For multicore operations
+#include "pico/rand.h"            // For random number generation
+#include "pico/stdlib.h"          // For standard I/O and sleep functions
 
 // Include Standard C headers
 #include <stdint.h>
@@ -29,6 +32,10 @@
 
 // Include LittleFS headers
 #include "lfs_port.h"
+
+// Direct memory-mapped registers for RP2350 QMI
+#define QMI_M0_TIMING_REG (*(volatile uint32_t *)(0x400d0008))
+#define QMI_M0_RFMT_REG (*(volatile uint32_t *)(0x400d000c))
 
 // Define constants for LED and tick delays
 #define LED_DELAY 500
@@ -240,11 +247,48 @@ static void dump_lfs_file(lfs_t *lfs_ptr, const char *path) {
     lfs_file_close(lfs_ptr, &file);
 }
 
+// Put the clock adjustment routine in RAM so it doesn't execute from
+// flash WHILE the flash clock and QMI dividers are actively changing!
+void __no_inline_not_in_flash_func(init_overclock)(void) {
+    // 1. Raise VREG to 1.60V FIRST
+    vreg_disable_voltage_limit();
+    vreg_set_voltage(VREG_VOLTAGE_1_60);
+
+    // Wait ~2ms for core power rail to fully stabilize on cold boot
+    for (volatile int i = 0; i < 50000; i++)
+        __asm volatile("nop");
+
+    // 2. Stage 1 Ramp: Step up to 250 MHz first
+    set_sys_clock_khz(250000, true);
+
+    // 3. Adjust QMI clock divisor BEFORE hitting 540 MHz
+    // Set CLKDIV = 6 (540 MHz / 6 = 90 MHz Flash SPI speed)
+    // Set RX_DELAY = 3
+    uint32_t timing = QMI_M0_TIMING_REG;
+    timing &= ~0x00000fff; // Clear CLKDIV (bits 0-7) and RX_DELAY (bits 8-11)
+    timing |= 6;           // CLKDIV = 6
+    timing |= (3 << 8);    // RX_DELAY = 3 cycles
+
+    // Extend Chip Select Hold time (bits 12-15) so CS pin doesn't deassert prematurely during writes
+    timing &= ~(0x0f << 12);
+    timing |= (3 << 12); // MAX_SELECT / MIN_DESELECT tuning
+
+    QMI_M0_TIMING_REG = timing;
+
+    // 4. Stage 2 Ramp: Jump to final target 540 MHz
+    set_sys_clock_khz(540000, true);
+
+    // 5. Flush XIP Cache
+    flash_flush_cache();
+}
+
 /**
  * @brief Main function.
  * @return int Return code.
  */
 int main() {
+
+    // init_overclock();
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
