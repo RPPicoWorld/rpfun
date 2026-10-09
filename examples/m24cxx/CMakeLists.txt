@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
+set(sdkVersion 2.3.1)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -38,6 +38,9 @@ project(main C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
+
+# Add M24CXX library folder
+add_subdirectory(m24cxx)
 
 # Add executable. Default name is the project name, version 0.1
 
@@ -65,6 +68,7 @@ target_include_directories(main PRIVATE
 target_link_libraries(main 
     pico_stdlib
     hardware_i2c
+    m24cxx
 )
 
 pico_enable_stdio_uart(main 1)
