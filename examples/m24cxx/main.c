@@ -19,11 +19,10 @@
 #include "hardware/gpio.h"    // For GPIO control
 #include "hardware/i2c.h"     // For I2C communication
 #include "hardware/timer.h"   // Required for hardware timer access
+#include "hardware/vreg.h"    // Needed for voltage scaling
 #include "pico/binary_info.h" // For binary information macros
 #include "pico/stdlib.h"      // For sleep and stdio initialization
 
-// Include standard I/O for printf
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -35,42 +34,15 @@
 #define BLINK_MOUNTED 1000 // 1s
 #define TICK_DELAY 1000
 
+// Function prototypes
+int pico_led_init(void);
+void pico_toggle_led(void);
+bool on_timer_tick(struct repeating_timer *t);
+void universal_tick_init();
+
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
 volatile uint32_t blink_interval_ms = LED_DELAY;
-
-/**
- * @brief Callback for the repeating timer.
- * Works on both ARM and RISC-V.
- */
-bool on_timer_tick(struct repeating_timer *t) {
-    systick++;
-    return true; // Keep the timer running
-}
-
-/**
- * @brief Universal tick initialization using the SDK timer pool.
- */
-void universal_tick_init() {
-    static struct repeating_timer timer;
-    // Negative delay means "measure from the start of the last callback"
-    // to avoid jitter. -1ms = 1000us frequency.
-    add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
-}
-
-// Perform initialisation
-int pico_led_init(void) {
-    gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
-    return PICO_OK;
-}
-
-/**
- * @brief Toggles the state of the default LED.
- */
-void pico_toggle_led() {
-    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
-}
 
 // I2C reserves some addresses for special purposes. We exclude these from the scan.
 // These are any addresses of the form 000 0xxx or 111 1xxx
@@ -201,6 +173,12 @@ void run_m24cxx_demo(m24cxx_t *dev, uint32_t test_size_bytes) {
  */
 int main() {
 
+    // Increase voltage to 1.3V for stable operation at 320 MHz (default is 1.2V)
+    vreg_set_voltage(VREG_VOLTAGE_1_35);
+
+    // Bump mcu clock to 320 MHz for maximum performance (default is 125 MHz)
+    set_sys_clock_khz(320000, true);
+
     int rc = pico_led_init(); // Initialize the LED GPIO
 
     hard_assert(rc == PICO_OK); // Ensure LED initialization was successful
@@ -254,11 +232,17 @@ int main() {
 
     // Initialize m24cxx library instance
     m24cxx_t m24cxx_dev;
-    m24cxx_init(&m24cxx_dev, i2c_default, 0x50, -1);
+    m24cxx_init(&m24cxx_dev, i2c_default, 0x50, -1); // No WP pin used in this example
 
     // Benchmark test size: Change to 16 * 1024 for quick 16 kB test, or M24CXX_SIZE for full 512 kB benchmark
     run_m24cxx_demo(&m24cxx_dev, M24CXX_SIZE);
     // run_m24cxx_demo(&m24cxx_dev, 16 * 1024);
+
+    uint32_t erase_start_tick = systick;
+    printf("\nErasing entire %s memory (%lu kB)...\n", M24CXX_TYPE, M24CXX_SIZE / 1024);
+    m24cxx_erase(&m24cxx_dev, 0, M24CXX_SIZE);
+    uint32_t erase_elapsed_ms = systick - erase_start_tick;
+    printf("Erase Complete in %lu ms\n", erase_elapsed_ms);
 
     // Reset systick to 0 to avoid overflow issues in the main loop
     systick = 0;
@@ -282,6 +266,39 @@ int main() {
 
         ++loop_cnt;
     }
+}
+
+/**
+ * @brief Callback for the repeating timer.
+ * Works on both ARM and RISC-V.
+ */
+bool on_timer_tick(struct repeating_timer *t) {
+    systick++;
+    return true; // Keep the timer running
+}
+
+/**
+ * @brief Universal tick initialization using the SDK timer pool.
+ */
+void universal_tick_init() {
+    static struct repeating_timer timer;
+    // Negative delay means "measure from the start of the last callback"
+    // to avoid jitter. -1ms = 1000us frequency.
+    add_repeating_timer_ms(-1, on_timer_tick, NULL, &timer);
+}
+
+// Perform initialisation
+int pico_led_init(void) {
+    gpio_init(PICO_DEFAULT_LED_PIN);              // The LED pin is defined in the board header as PICO_DEFAULT_LED_PIN
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT); // Set the LED pin as an output
+    return PICO_OK;
+}
+
+/**
+ * @brief Toggles the state of the default LED.
+ */
+void pico_toggle_led() {
+    gpio_xor_mask64(((uint64_t)1 << PICO_DEFAULT_LED_PIN));
 }
 
 // vim: ts=4 et nowrap

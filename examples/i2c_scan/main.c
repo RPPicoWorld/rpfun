@@ -1,20 +1,15 @@
 /**
  * @file main.c
- * @brief USB HID example for Raspberry Pi Pico using the Pico SDK.
+ * @brief Scan I2C bus for devices
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling USB HID functionality on the Raspberry Pi Pico using the Pico SDK's USB stack, which is
- * compatible with both ARM and RISC-V cores. This example demonstrates:
- * - Creating a USB HID device
- * - Handling USB HID reports
- *
+ * Scanning the I2C bus for connected devices using the Raspberry Pi Pico and the Pico SDK.
  */
 
 // Include necessary headers from the Pico SDK
-
 #include "hardware/clocks.h"  // For clock frequency information
 #include "hardware/gpio.h"    // For GPIO control
 #include "hardware/i2c.h"     // For I2C communication
@@ -26,9 +21,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define LED_DELAY 500      // 500ms
-#define BLINK_MOUNTED 1000 // 1s
-#define TICK_DELAY 1000
+#define LED_DELAY 500   // 500ms
+#define TICK_DELAY 1000 // 1s
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -106,10 +100,6 @@ int main() {
     i2c_init(i2c_default, 100 * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
-    gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
-    gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
-    // Make the I2C pins available to picotool
-    bi_decl(bi_2pins_with_func(PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C));
 
     printf("\nI2C Bus Scan\n");
     printf("   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");

@@ -5,7 +5,7 @@
  ******************************************************************************
  * @attention
  *
- * Copyright (c) 2023
+ * Copyright (c) 2026
  * Lars Boegild Thomsen <lbthomsen@gmail.com>
  * All rights reserved.
  *
@@ -61,8 +61,7 @@
 #define m24cxx_dbg(...)
 #endif
 
-typedef struct
-{
+typedef struct {
     i2c_inst_t *i2c;
     uint8_t i2c_address;
     int wp_pin;
@@ -81,3 +80,5 @@ m24cxx_status_t m24cxx_erase(m24cxx_t *m24cxx, uint32_t address, uint32_t len);
 m24cxx_status_t m24cxx_erase_all(m24cxx_t *m24cxx);
 
 #endif /* M24CXX_H_ */
+
+// vim: ts=4 et nowrap
