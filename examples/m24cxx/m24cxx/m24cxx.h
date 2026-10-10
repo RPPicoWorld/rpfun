@@ -53,14 +53,6 @@
 #error "M24CXX_MODEL must be defined in project properties"
 #endif
 
-#ifdef xxxDEBUG
-#define m24cxx_dbg(...)  \
-    printf(__VA_ARGS__); \
-    printf("\r\n")
-#else
-#define m24cxx_dbg(...)
-#endif
-
 typedef struct {
     i2c_inst_t *i2c;
     uint8_t i2c_address;

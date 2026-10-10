@@ -59,8 +59,11 @@ static inline uint8_t get_dev_addr(m24cxx_t *m24cxx, uint32_t address) {
 #if M24CXX_MODEL == M24C08
     return 0x50 | ((uint8_t)(address >> 8) & 0x03);
 #elif M24CXX_MODEL == M24M01 || M24CXX_MODEL == M24M01X4
-    // Base 0x50 + 64 KiB block index (A2, A1, A16)
-    return 0x50 | ((uint8_t)(address >> 16) & 0x07);
+    // Calculate 64 KB block index
+    // Bit 16 (A16) becomes I2C addr bit 0
+    // Bits 17+ (A17/A18) shift into Chip Select bits (A1/A2)
+    uint8_t block_index = (uint8_t)(address >> 16);
+    return m24cxx->i2c_address + block_index;
 #else
     return m24cxx->i2c_address + (uint8_t)(address >> M24CXX_ADDRESS_BITS);
 #endif
