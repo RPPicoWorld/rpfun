@@ -48,13 +48,20 @@ add_executable(main
     main.c
 )
 
+get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+find_program(CMAKE_SIZE_UTIL arm-none-eabi-size HINTS ${TOOLCHAIN_BIN_DIR})
+
+add_custom_command(TARGET main POST_BUILD
+    COMMAND ${CMAKE_SIZE_UTIL} $<TARGET_FILE:main>
+)
+
 target_sources(main PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/main.c
 )
 
 # Add specific optimization flags to your 'main' target
 target_compile_options(main PRIVATE
-    -O3
+    -O0
     -ffunction-sections 
     -fdata-sections
 )

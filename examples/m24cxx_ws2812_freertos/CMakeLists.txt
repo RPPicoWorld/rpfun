@@ -37,12 +37,12 @@ project(main C CXX ASM)
 # MUST be initialized to set up the toolchain rules for ASM
 pico_sdk_init()
 
-# Add M24CXX library folder
-add_subdirectory(m24cxx)
-
-# 4. Now import FreeRTOS AFTER toolchain & ASM are initialized
+# Now import FreeRTOS AFTER toolchain & ASM are initialized
 set(FREERTOS_KERNEL_PATH "${CMAKE_CURRENT_LIST_DIR}/FreeRTOS-Kernel" CACHE PATH "Path to FreeRTOS Kernel")
 include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040/FreeRTOS_Kernel_import.cmake)
+
+# Add M24CXX library folder
+add_subdirectory(m24cxx)
 
 # Add executable
 add_executable(main
@@ -85,7 +85,7 @@ target_link_libraries(main
     hardware_pio
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
-    m 
+    m24cxx
 )
 
 pico_enable_stdio_uart(main 1)

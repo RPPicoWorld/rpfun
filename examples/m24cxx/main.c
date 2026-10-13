@@ -174,10 +174,10 @@ void run_m24cxx_demo(m24cxx_t *dev, uint32_t test_size_bytes) {
 int main() {
 
     // Increase voltage to 1.3V for stable operation at 320 MHz (default is 1.2V)
-    vreg_set_voltage(VREG_VOLTAGE_1_35);
+    /// vreg_set_voltage(VREG_VOLTAGE_1_35);
 
     // Bump mcu clock to 320 MHz for maximum performance (default is 125 MHz)
-    set_sys_clock_khz(320000, true);
+    // set_sys_clock_khz(320000, true);
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 

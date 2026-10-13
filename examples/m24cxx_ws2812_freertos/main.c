@@ -41,6 +41,10 @@
 
 #include "stats.h" // For FreeRTOS statistics monitoring
 
+// Set target memory topology before including library header
+#define M24CXX_MODEL M24M01X4
+#include "m24cxx.h" // For M24CXX EEPROM access
+
 #define LED_DELAY 500   // 500ms
 #define TICK_DELAY 1000 // 1000ms = 1 second
 
@@ -61,6 +65,8 @@ struct ws2812_pixel_t {
     uint8_t green;  // Green component (0-255)
     uint8_t blue;   // Blue component (0-255)
 };
+
+m24cxx_t m24cxx_dev;
 
 // --- DMA Globals ---
 static uint32_t led_buffer[NUM_LEDS]; // Buffer to hold the 24-bit GRB values for each LED, aligned to 32 bits for DMA transfer
@@ -218,6 +224,124 @@ void ws2812_queue_receive_task(void *pvParameters) {
 }
 
 /**
+ * @brief IEEE 802.3 CRC32 calculation.
+ */
+uint32_t calculate_crc32(const uint8_t *data, size_t length, uint32_t previous_crc) {
+    uint32_t crc = ~previous_crc;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xEDB88320;
+            else
+                crc >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+void m24cxx_demo_task(void *pvParameters) {
+
+    uint8_t tx_buf[M24CXX_WRITE_PAGE_SIZE];
+    uint8_t rx_buf[M24CXX_READ_PAGE_SIZE];
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+        struct ws2812_pixel_t pixel = {
+            .index = i,
+            .red = 20,
+            .green = 0,
+            .blue = 0
+        };
+        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+    }
+
+    // Signal refresh task to trigger DMA transfer once full frame is queued
+    if (ws2812_refresh_task_handle != NULL) {
+        xTaskNotifyGive(ws2812_refresh_task_handle);
+    }
+
+    // For now, run 30 seconds then die
+    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("Starting M24CXX demo task...\n");
+        xSemaphoreGive(printf_mutex);
+    }
+
+    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("\n=== Starting %lu kB (%s) Memory Benchmark ===\n", M24CXX_SIZE / 1024, M24CXX_TYPE);
+        xSemaphoreGive(printf_mutex);
+    }
+
+    // --- WRITE PASS ---
+    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("Writing %lu kB in %d-byte blocks via m24cxx...\n", test_size_bytes / 1024, M24CXX_WRITE_PAGE_SIZE);
+        xSemaphoreGive(printf_mutex);
+    }
+
+    uint32_t write_crc = 0;
+    uint32_t start_write_tick = systick;
+    uint32_t bytes_written = 0;
+
+    for (uint32_t addr = 0; addr < test_size_bytes; addr += M24CXX_WRITE_PAGE_SIZE) {
+        for (uint32_t i = 0; i < M24CXX_WRITE_PAGE_SIZE; i++) {
+            tx_buf[i] = (uint8_t)((addr + i) ^ 0xA5);
+        }
+
+        write_crc = calculate_crc32(tx_buf, M24CXX_WRITE_PAGE_SIZE, write_crc);
+
+        if (m24cxx_write(dev, addr, tx_buf, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
+            printf("\n[ERROR] m24cxx_write failed at 0x%05lX\n", addr);
+            return;
+        }
+
+        bytes_written += M24CXX_WRITE_PAGE_SIZE;
+
+        // Print a dot for every 1 kB (1024 bytes)
+        if (bytes_written % 1024 == 0) {
+            printf(".");
+            fflush(stdout);
+
+            // Wrap line and show progress every 16 kB
+            if ((bytes_written / 1024) % 16 == 0) {
+                printf(" [%lu kB / %lu ms]\n", bytes_written / 1024, systick - start_write_tick);
+            }
+        }
+    }
+
+    if ((bytes_written / 1024) % 16 != 0) {
+        printf("\n");
+    }
+
+    uint32_t write_elapsed_ms = systick - start_write_tick;
+    printf("Write Complete in %lu ms | CRC32: 0x%08lX\n\n", write_elapsed_ms, write_crc);
+
+    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("Ending M24CXX demo task...\n");
+        xSemaphoreGive(printf_mutex);
+    }
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+        struct ws2812_pixel_t pixel = {
+            .index = i,
+            .red = 0,
+            .green = 0,
+            .blue = 0
+        };
+        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+    }
+
+    // Signal refresh task to trigger DMA transfer once full frame is queued
+    if (ws2812_refresh_task_handle != NULL) {
+        xTaskNotifyGive(ws2812_refresh_task_handle);
+    }
+
+    // Clear the task handle so Core 1 knows it can re-create it
+    // m24cxx_demo_task_handle = NULL;
+
+    // Correct way to exit a FreeRTOS task:
+    vTaskDelete(NULL);
+}
+
+/**
  * @brief FreeRTOS Task for Core 0 execution.
  */
 void core0_entry_task(void *pvParameters) {
@@ -278,138 +402,32 @@ void core1_entry_task(void *pvParameters) {
             xSemaphoreGive(printf_mutex);
         }
 
+        // Check if task handle exists and if the task has entered deleted state
+        if (m24cxx_demo_task_handle != NULL) {
+            eTaskState state = eTaskGetState(m24cxx_demo_task_handle);
+            if (state == eDeleted) {
+                m24cxx_demo_task_handle = NULL; // Safe to clear now
+            }
+        }
+
+        if (m24cxx_demo_task_handle == NULL) {
+
+            if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
+                printf("M24CXX task is NOT running - starting...\n");
+                xSemaphoreGive(printf_mutex);
+            }
+
+            // Create the M24CXX Demo Task on Core 1
+            xTaskCreate(
+                m24cxx_demo_task,
+                "M24CXXDemoTask",
+                configMINIMAL_STACK_SIZE + 1024,
+                NULL,
+                2,
+                &m24cxx_demo_task_handle);
+        }
+
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(TICK_DELAY));
-    }
-}
-
-void m24cxx_demo_task(void *pvParameters) {
-    // For now, run 30 seconds then die
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("Starting M24CXX demo task...\n");
-        xSemaphoreGive(printf_mutex);
-    }
-    vTaskDelay(pdMS_TO_TICKS(30000));
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("Ending M24CXX demo task...\n");
-        xSemaphoreGive(printf_mutex);
-    }
-}
-
-/**
- * @brief Original FreeRTOS Demo Task mapped to 8x8 Serpentine Matrix
- */
-void ws2812_demo_task(void *pvParameters) {
-
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    uint8_t pattern_mode = 0;
-    uint16_t state_counter = 0;
-    uint32_t pattern_swap_ticks = pdMS_TO_TICKS(PATTERN_SWAP_DELAY);
-    TickType_t next_pattern_time = xLastWakeTime + pattern_swap_ticks;
-
-    while (1) {
-        TickType_t now = xTaskGetTickCount();
-
-        // Switch animation pattern every 10 seconds
-        if (now >= next_pattern_time) {
-            pattern_mode = (pattern_mode + 1) % 4;
-            state_counter = 0;
-            next_pattern_time = now + pattern_swap_ticks;
-        }
-
-        // Generate animation frame
-        switch (pattern_mode) {
-        case 0: { // Rainbow Wave
-            for (int i = 0; i < NUM_LEDS; i++) {
-                uint8_t pos = (i * 256 / NUM_LEDS + state_counter) & 0xFF;
-                pos = 255 - pos;
-                uint8_t r, g, b;
-                if (pos < 85) {
-                    r = 255 - pos * 3;
-                    g = 0;
-                    b = pos * 3;
-                } else if (pos < 170) {
-                    pos -= 85;
-                    r = 0;
-                    g = pos * 3;
-                    b = 255 - pos * 3;
-                } else {
-                    pos -= 170;
-                    r = pos * 3;
-                    g = 255 - pos * 3;
-                    b = 0;
-                }
-                struct ws2812_pixel_t pixel = { .index = i, .red = r, .green = g, .blue = b };
-                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-            }
-            state_counter += 2;
-            break;
-        }
-
-        case 1: { // Pixel Chaser with Fade Tail
-            uint16_t head = state_counter % NUM_LEDS;
-            for (int i = 0; i < NUM_LEDS; i++) {
-                struct ws2812_pixel_t pixel = { .index = i, .red = 0, .green = 0, .blue = 0 };
-                if (i == head) {
-                    pixel.red = 255;
-                    pixel.green = 255;
-                    pixel.blue = 255;
-                } else if (i == (head + NUM_LEDS - 1) % NUM_LEDS) {
-                    pixel.blue = 150;
-                } else if (i == (head + NUM_LEDS - 2) % NUM_LEDS) {
-                    pixel.blue = 40;
-                }
-                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-            }
-            state_counter++;
-            break;
-        }
-
-        case 2: { // Color Wipe
-            uint16_t fill_len = (state_counter / 2) % (NUM_LEDS + 1);
-            uint8_t color_idx = (state_counter / (NUM_LEDS * 2)) % 3;
-
-            for (int i = 0; i < NUM_LEDS; i++) {
-                struct ws2812_pixel_t pixel = { .index = i, .red = 0, .green = 0, .blue = 0 };
-                if (i < fill_len) {
-                    if (color_idx == 0)
-                        pixel.red = 255;
-                    else if (color_idx == 1)
-                        pixel.green = 255;
-                    else
-                        pixel.blue = 255;
-                }
-                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-            }
-            state_counter++;
-            break;
-        }
-
-        case 3: { // Breathing Pulse
-            uint8_t brightness;
-            uint8_t phase = state_counter & 0xFF;
-            brightness = (phase < 128) ? (phase * 2) : ((255 - phase) * 2);
-
-            for (int i = 0; i < NUM_LEDS; i++) {
-                struct ws2812_pixel_t pixel = {
-                    .index = i,
-                    .red = brightness,
-                    .green = brightness / 2,
-                    .blue = 0
-                };
-                xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-            }
-            state_counter += 2;
-            break;
-        }
-        }
-
-        // Signal refresh task to trigger DMA transfer once full frame is queued
-        if (ws2812_refresh_task_handle != NULL) {
-            xTaskNotifyGive(ws2812_refresh_task_handle);
-        }
-
-        // Target ~50 FPS (20ms interval)
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(WS2812_FRAME_DELAY));
     }
 }
 
@@ -463,6 +481,33 @@ int main() {
 
     // Initialize the automatic temperature sensor reading via ADC
     init_automatic_temp_sensor();
+
+    // Initialize I2C0 at 1 MHz (Fast Mode)
+    i2c_init(i2c_default, 1000 * 1000);
+    gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
+    //  Make the I2C pins available to picotool
+    //  bi_decl(bi_2pins_with_func(PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C));
+
+    printf("\nI2C Bus Scan\n");
+    printf("   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
+    for (int addr = 0; addr < (1 << 7); ++addr) {
+        if (addr % 16 == 0) {
+            printf("%02x ", addr);
+        }
+
+        // Skip over any reserved addresses.
+        int ret;
+        uint8_t rxdata;
+        ret = i2c_read_blocking(i2c_default, addr, &rxdata, 1, false);
+
+        printf(ret < 0 ? "." : "*");
+        printf(addr % 16 == 15 ? "\n" : "  ");
+    }
+    printf("Done.\n");
+
+    // Initialize m24cxx library instance
+    m24cxx_init(&m24cxx_dev, i2c_default, 0x50, -1); // No WP pin used in this example
 
     // Select PIO instance and state machine
     PIO pio = pio0;
@@ -520,14 +565,14 @@ int main() {
         2,
         &ws2812_refresh_task_handle);
 
-    // Create the WS2812 Animation Demo Task
-    xTaskCreate(
-        ws2812_demo_task,
-        "WSDemoTask",
-        configMINIMAL_STACK_SIZE + 256,
-        NULL,
-        2,
-        &ws2812_demo_task_handle);
+    // // Create the WS2812 Animation Demo Task
+    // xTaskCreate(
+    //     ws2812_demo_task,
+    //     "WSDemoTask",
+    //     configMINIMAL_STACK_SIZE + 256,
+    //     NULL,
+    //     2,
+    //     &ws2812_demo_task_handle);
 
     // Core 0 Task
     TaskHandle_t core0_handle = NULL;

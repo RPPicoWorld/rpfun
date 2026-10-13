@@ -50,7 +50,7 @@ target_sources(main PUBLIC
 
 # Add specific optimization flags to your 'main' target
 target_compile_options(main PRIVATE
-    -O3
+    -O0
     -ffunction-sections 
     -fdata-sections
 )

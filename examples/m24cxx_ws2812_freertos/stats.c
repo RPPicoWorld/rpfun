@@ -11,6 +11,7 @@
  */
 
 #include "stats.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -20,14 +21,22 @@
 
 static SemaphoreHandle_t g_printf_mutex = NULL;
 
+// Helper structure to map Task Numbers safely without out-of-bounds access
+typedef struct {
+    UBaseType_t xTaskNumber;
+    uint32_t ulLastRunTime;
+} TaskHistory_t;
+
+#define MAX_TRACKED_TASKS 32
+
 /**
  * @brief Task implementation that periodically dumps task and system memory stats.
  */
 void stats_task(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    // Track previous runtime counts across iterations for accurate deltas
-    static uint32_t u32LastTaskRunTimes[32] = { 0 };
+    // Track task runtime history safely using structure lookup
+    static TaskHistory_t xTaskHistory[MAX_TRACKED_TASKS] = { 0 };
     static uint64_t u64LastWallClockUs = 0;
 
     while (1) {
@@ -45,13 +54,30 @@ void stats_task(void *pvParameters) {
             uint64_t u64ElapsedUs = u64CurrentWallClockUs - u64LastWallClockUs;
             u64LastWallClockUs = u64CurrentWallClockUs;
 
+            // Step 1: Purge history entries for tasks that no longer exist in the system
+            for (int h = 0; h < MAX_TRACKED_TASKS; h++) {
+                if (xTaskHistory[h].xTaskNumber != 0) {
+                    bool bTaskStillExists = false;
+                    for (UBaseType_t i = 0; i < uxTaskCount; i++) {
+                        if (pxTaskStatusArray[i].xTaskNumber == xTaskHistory[h].xTaskNumber) {
+                            bTaskStillExists = true;
+                            break;
+                        }
+                    }
+                    if (!bTaskStillExists) {
+                        xTaskHistory[h].xTaskNumber = 0; // Free up slot for new tasks
+                        xTaskHistory[h].ulLastRunTime = 0;
+                    }
+                }
+            }
+
             if (g_printf_mutex != NULL && xSemaphoreTake(g_printf_mutex, portMAX_DELAY) == pdTRUE) {
-                printf("\n=============================== SYSTEM STATS ===============================\n");
+                printf("\n=================================== SYSTEM STATS ===================================\n");
                 printf("Free Heap           : %zu bytes\n", xPortGetFreeHeapSize());
                 printf("Minimum Ever Free   : %zu bytes\n", xPortGetMinimumEverFreeHeapSize());
-                printf("----------------------------------------------------------------------------\n");
-                printf("Task          State  Prio  Stack   Num   Affinity        Ticks        %% Core\n");
-                printf("----------------------------------------------------------------------------\n");
+                printf("------------------------------------------------------------------------------------\n");
+                printf("Task               State  Prio  Stack    Num    Affinity        Ticks        %% Core\n");
+                printf("------------------------------------------------------------------------------------\n");
 
                 uint32_t u32TotalCoreUsageX100 = 0;
 
@@ -60,8 +86,31 @@ void stats_task(void *pvParameters) {
 
                     // Compute delta execution microseconds spent in this window
                     uint32_t u32CurrentTaskRunTime = pxTaskStatusArray[i].ulRunTimeCounter;
-                    uint32_t u32DeltaTaskUs = u32CurrentTaskRunTime - u32LastTaskRunTimes[tNum];
-                    u32LastTaskRunTimes[tNum] = u32CurrentTaskRunTime;
+
+                    // Safely find previous runtime in tracked history array without buffer overflow
+                    uint32_t u32PreviousRunTime = 0;
+                    int slot_found = -1;
+                    int empty_slot = -1;
+
+                    for (int h = 0; h < MAX_TRACKED_TASKS; h++) {
+                        if (xTaskHistory[h].xTaskNumber == tNum) {
+                            slot_found = h;
+                            u32PreviousRunTime = xTaskHistory[h].ulLastRunTime;
+                            break;
+                        } else if (xTaskHistory[h].xTaskNumber == 0 && empty_slot == -1) {
+                            empty_slot = h;
+                        }
+                    }
+
+                    uint32_t u32DeltaTaskUs = u32CurrentTaskRunTime - u32PreviousRunTime;
+
+                    // Update history slots
+                    if (slot_found != -1) {
+                        xTaskHistory[slot_found].ulLastRunTime = u32CurrentTaskRunTime;
+                    } else if (empty_slot != -1) {
+                        xTaskHistory[empty_slot].xTaskNumber = tNum;
+                        xTaskHistory[empty_slot].ulLastRunTime = u32CurrentTaskRunTime;
+                    }
 
                     // Calculate percentage * 100 (e.g. 21.15% stored as 2115)
                     uint32_t u32CorePctX100 = 0;
@@ -89,13 +138,13 @@ void stats_task(void *pvParameters) {
                         break;
                     }
 
-                    // Print row with 2 decimal places and fixed column alignment
-                    printf("%-12s   %c    %2lu   %5u   %3lu   0x%08lx  %10lu    %3lu.%02lu%%\n", pxTaskStatusArray[i].pcTaskName, cState, pxTaskStatusArray[i].uxCurrentPriority, pxTaskStatusArray[i].usStackHighWaterMark, pxTaskStatusArray[i].xTaskNumber, pxTaskStatusArray[i].uxCoreAffinityMask, pxTaskStatusArray[i].ulRunTimeCounter, u32CorePctX100 / 100, u32CorePctX100 % 100);
+                    // Print row with 16-char task name (%-16s) and 6-digit task number (%6lu)
+                    printf("%-16s   %c    %2lu   %5u   %6lu   0x%08lx  %10lu    %3lu.%02lu%%\n", pxTaskStatusArray[i].pcTaskName, cState, pxTaskStatusArray[i].uxCurrentPriority, pxTaskStatusArray[i].usStackHighWaterMark, pxTaskStatusArray[i].xTaskNumber, pxTaskStatusArray[i].uxCoreAffinityMask, pxTaskStatusArray[i].ulRunTimeCounter, u32CorePctX100 / 100, u32CorePctX100 % 100);
                 }
 
-                printf("----------------------------------------------------------------------------\n");
-                printf("TOTAL DUAL-CORE LOAD (Max 200.00%%)                     :   %3lu.%02lu%%\n", u32TotalCoreUsageX100 / 100, u32TotalCoreUsageX100 % 100);
-                printf("============================================================================\n\n");
+                printf("------------------------------------------------------------------------------------\n");
+                printf("TOTAL DUAL-CORE LOAD (Max 200.00%%)                         :   %3lu.%02lu%%\n", u32TotalCoreUsageX100 / 100, u32TotalCoreUsageX100 % 100);
+                printf("====================================================================================\n\n");
 
                 xSemaphoreGive(g_printf_mutex);
             }
@@ -114,7 +163,7 @@ BaseType_t stats_task_init(SemaphoreHandle_t xPrintfMutex) {
     return xTaskCreate(
         stats_task,
         "StatsTask",
-        256, // 256-word stack allocation for formatted buffer printing
+        configMINIMAL_STACK_SIZE + 512, // 512-word stack allocation to prevent printf overflow
         NULL,
         2, /* Low priority background task */
         NULL);
