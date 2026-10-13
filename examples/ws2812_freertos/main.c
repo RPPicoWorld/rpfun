@@ -45,7 +45,7 @@
 #define TICK_DELAY 1000 // 1000ms = 1 second
 
 #define NUM_LEDS 64
-#define WS2812_PIN 29
+#define WS2812_PIN 12
 #define IS_RGBW false
 
 #define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
