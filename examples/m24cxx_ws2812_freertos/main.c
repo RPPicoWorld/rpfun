@@ -58,6 +58,14 @@
 // Max brightness factor (0 = off, 255 = 100% full brightness)
 #define MAX_BRIGHTNESS 64 // ~25% brightness
 
+#define SAFE_PRINTF(fmt, ...)                                        \
+    do {                                                             \
+        if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) { \
+            printf(fmt, ##__VA_ARGS__);                              \
+            xSemaphoreGive(printf_mutex);                            \
+        }                                                            \
+    } while (0)
+
 // Define a structure to represent a WS2812 pixel with its index and RGB color components
 struct ws2812_pixel_t {
     uint16_t index; // Index of the LED in the strip (0 to NUM_LEDS-1)
@@ -245,6 +253,8 @@ void m24cxx_demo_task(void *pvParameters) {
     uint8_t tx_buf[M24CXX_WRITE_PAGE_SIZE];
     uint8_t rx_buf[M24CXX_READ_PAGE_SIZE];
 
+    SAFE_PRINTF("Starting M24CXX demo task...\n");
+
     for (int i = 0; i < NUM_LEDS; i++) {
         struct ws2812_pixel_t pixel = {
             .index = i,
@@ -260,64 +270,57 @@ void m24cxx_demo_task(void *pvParameters) {
         xTaskNotifyGive(ws2812_refresh_task_handle);
     }
 
-    // For now, run 30 seconds then die
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("Starting M24CXX demo task...\n");
-        xSemaphoreGive(printf_mutex);
-    }
-
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("\n=== Starting %lu kB (%s) Memory Benchmark ===\n", M24CXX_SIZE / 1024, M24CXX_TYPE);
-        xSemaphoreGive(printf_mutex);
-    }
+    SAFE_PRINTF("\n=== Starting %lu kB (%s) Memory Benchmark ===\n", M24CXX_SIZE / 1024, M24CXX_TYPE);
 
     // --- WRITE PASS ---
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("Writing %lu kB in %d-byte blocks via m24cxx...\n", test_size_bytes / 1024, M24CXX_WRITE_PAGE_SIZE);
-        xSemaphoreGive(printf_mutex);
-    }
+    SAFE_PRINTF("Writing %lu kB in %d-byte blocks via m24cxx...\n", M24CXX_SIZE / 1024, M24CXX_WRITE_PAGE_SIZE);
 
     uint32_t write_crc = 0;
-    uint32_t start_write_tick = systick;
+    uint32_t start_write_tick = xTaskGetTickCount();
     uint32_t bytes_written = 0;
 
-    for (uint32_t addr = 0; addr < test_size_bytes; addr += M24CXX_WRITE_PAGE_SIZE) {
+    for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_WRITE_PAGE_SIZE) {
+
         for (uint32_t i = 0; i < M24CXX_WRITE_PAGE_SIZE; i++) {
             tx_buf[i] = (uint8_t)((addr + i) ^ 0xA5);
         }
 
         write_crc = calculate_crc32(tx_buf, M24CXX_WRITE_PAGE_SIZE, write_crc);
 
-        if (m24cxx_write(dev, addr, tx_buf, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
-            printf("\n[ERROR] m24cxx_write failed at 0x%05lX\n", addr);
+        if (m24cxx_write(&m24cxx_dev, addr, tx_buf, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
+            SAFE_PRINTF("\n[ERROR] m24cxx_write failed at 0x%05lX\n", addr);
             return;
         }
 
         bytes_written += M24CXX_WRITE_PAGE_SIZE;
 
-        // Print a dot for every 1 kB (1024 bytes)
-        if (bytes_written % 1024 == 0) {
-            printf(".");
-            fflush(stdout);
+        // Calculate which LED should be illuminated (0 to 63)
+        uint16_t current_led = (bytes_written * NUM_LEDS) / M24CXX_SIZE;
 
-            // Wrap line and show progress every 16 kB
-            if ((bytes_written / 1024) % 16 == 0) {
-                printf(" [%lu kB / %lu ms]\n", bytes_written / 1024, systick - start_write_tick);
-            }
+        // Ensure bounds safety
+        if (current_led >= NUM_LEDS) {
+            current_led = NUM_LEDS - 1;
+        }
+
+        // Send pixel update
+        struct ws2812_pixel_t pixel = {
+            .index = current_led,
+            .red = 0,
+            .green = 0,
+            .blue = 20
+        };
+        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+
+        // Signal refresh task to trigger DMA transfer once full frame is queued
+        if (ws2812_refresh_task_handle != NULL) {
+            xTaskNotifyGive(ws2812_refresh_task_handle);
         }
     }
 
-    if ((bytes_written / 1024) % 16 != 0) {
-        printf("\n");
-    }
+    uint32_t write_elapsed_ms = (xTaskGetTickCount() - start_write_tick) * portTICK_PERIOD_MS;
+    SAFE_PRINTF("Write Complete in %lu ms | CRC32: 0x%08lX\n\n", write_elapsed_ms, write_crc);
 
-    uint32_t write_elapsed_ms = systick - start_write_tick;
-    printf("Write Complete in %lu ms | CRC32: 0x%08lX\n\n", write_elapsed_ms, write_crc);
-
-    if (xSemaphoreTake(printf_mutex, portMAX_DELAY) == pdTRUE) {
-        printf("Ending M24CXX demo task...\n");
-        xSemaphoreGive(printf_mutex);
-    }
+    SAFE_PRINTF("Ending M24CXX demo task...\n");
 
     for (int i = 0; i < NUM_LEDS; i++) {
         struct ws2812_pixel_t pixel = {

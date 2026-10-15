@@ -72,12 +72,12 @@ void stats_task(void *pvParameters) {
             }
 
             if (g_printf_mutex != NULL && xSemaphoreTake(g_printf_mutex, portMAX_DELAY) == pdTRUE) {
-                printf("\n=================================== SYSTEM STATS ===================================\n");
-                printf("Free Heap           : %zu bytes\n", xPortGetFreeHeapSize());
-                printf("Minimum Ever Free   : %zu bytes\n", xPortGetMinimumEverFreeHeapSize());
-                printf("------------------------------------------------------------------------------------\n");
-                printf("Task               State  Prio  Stack    Num    Affinity        Ticks        %% Core\n");
-                printf("------------------------------------------------------------------------------------\n");
+                printf("\n================================= SYSTEM STATS =================================\n");
+                printf("Free Heap         : %zu bytes\n", xPortGetFreeHeapSize());
+                printf("Minimum Ever Free : %zu bytes\n", xPortGetMinimumEverFreeHeapSize());
+                printf("--------------------------------------------------------------------------------\n");
+                printf("Task               State Prio Stack  Num  Aff    Ticks        %% Core\n");
+                printf("--------------------------------------------------------------------------------\n");
 
                 uint32_t u32TotalCoreUsageX100 = 0;
 
@@ -138,13 +138,16 @@ void stats_task(void *pvParameters) {
                         break;
                     }
 
-                    // Print row with 16-char task name (%-16s) and 6-digit task number (%6lu)
-                    printf("%-16s   %c    %2lu   %5u   %6lu   0x%08lx  %10lu    %3lu.%02lu%%\n", pxTaskStatusArray[i].pcTaskName, cState, pxTaskStatusArray[i].uxCurrentPriority, pxTaskStatusArray[i].usStackHighWaterMark, pxTaskStatusArray[i].xTaskNumber, pxTaskStatusArray[i].uxCoreAffinityMask, pxTaskStatusArray[i].ulRunTimeCounter, u32CorePctX100 / 100, u32CorePctX100 % 100);
+                    // Mask affinity to 8-bit hex representation
+                    uint8_t u8Affinity = (uint8_t)(pxTaskStatusArray[i].uxCoreAffinityMask & 0xFF);
+
+                    // Print formatted row (Exactly 80 chars total)
+                    printf("%-16.16s  %c   %2lu  %5u %5lu 0x%02X %10lu  %3lu.%02lu%%\n", pxTaskStatusArray[i].pcTaskName, cState, pxTaskStatusArray[i].uxCurrentPriority, pxTaskStatusArray[i].usStackHighWaterMark, pxTaskStatusArray[i].xTaskNumber, u8Affinity, pxTaskStatusArray[i].ulRunTimeCounter, u32CorePctX100 / 100, u32CorePctX100 % 100);
                 }
 
-                printf("------------------------------------------------------------------------------------\n");
-                printf("TOTAL DUAL-CORE LOAD (Max 200.00%%)                         :   %3lu.%02lu%%\n", u32TotalCoreUsageX100 / 100, u32TotalCoreUsageX100 % 100);
-                printf("====================================================================================\n\n");
+                printf("--------------------------------------------------------------------------------\n");
+                printf("TOTAL DUAL-CORE LOAD (Max 200.00%%)                       : %3lu.%02lu%%\n", u32TotalCoreUsageX100 / 100, u32TotalCoreUsageX100 % 100);
+                printf("================================================================================\n\n");
 
                 xSemaphoreGive(g_printf_mutex);
             }
