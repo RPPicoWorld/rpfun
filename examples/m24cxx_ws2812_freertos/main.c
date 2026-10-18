@@ -248,9 +248,164 @@ uint32_t calculate_crc32(const uint8_t *data, size_t length, uint32_t previous_c
     return ~crc;
 }
 
-void m24cxx_demo_task(void *pvParameters) {
+/**
+ * @brief Demo function to write data to the M24CXX EEPROM.
+ * @return uint32_t Returns the calculated CRC32 of the written data.
+ */
+uint32_t m24cxx_demo_write() {
 
     uint8_t tx_buf[M24CXX_WRITE_PAGE_SIZE];
+
+    // --- WRITE PASS ---
+    SAFE_PRINTF("Writing %lu kB in %d-byte blocks via m24cxx...\n", M24CXX_SIZE / 1024, M24CXX_WRITE_PAGE_SIZE);
+
+    uint32_t write_crc = 0;
+    uint32_t start_write_tick = xTaskGetTickCount();
+    uint32_t bytes_written = 0;
+
+    const uint32_t bytes_per_led = M24CXX_SIZE / NUM_LEDS; // 524,288 / 64 = 8,192 bytes per LED
+
+    for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_WRITE_PAGE_SIZE) {
+
+        for (uint32_t i = 0; i < M24CXX_WRITE_PAGE_SIZE; i++) {
+            tx_buf[i] = (uint8_t)((addr + i) ^ 0xA5);
+        }
+
+        write_crc = calculate_crc32(tx_buf, M24CXX_WRITE_PAGE_SIZE, write_crc);
+
+        if (m24cxx_write(&m24cxx_dev, addr, tx_buf, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
+            SAFE_PRINTF("\n[ERROR] m24cxx_write failed at 0x%05lX\n", addr);
+            return 0;
+        }
+
+        bytes_written += M24CXX_WRITE_PAGE_SIZE;
+
+        // Only update the LED when the LAST byte of a full 8 kB block has finished
+        if (bytes_written % bytes_per_led == 0) {
+            uint16_t completed_led = (bytes_written / bytes_per_led) - 1;
+
+            struct ws2812_pixel_t pixel = {
+                .index = completed_led,
+                .red = 0,
+                .green = 0,
+                .blue = 20
+            };
+            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+
+            if (ws2812_refresh_task_handle != NULL) {
+                xTaskNotifyGive(ws2812_refresh_task_handle);
+            }
+        }
+    }
+
+    uint32_t write_elapsed_ms = (xTaskGetTickCount() - start_write_tick) * portTICK_PERIOD_MS;
+    SAFE_PRINTF("Write Complete in %lu ms | CRC32: 0x%08lX\n\n", write_elapsed_ms, write_crc);
+
+    return write_crc;
+}
+
+/**
+ * @brief Demo function to read data from the M24CXX EEPROM.
+ * @return uint32_t Returns the calculated CRC32 of the read data.
+ */
+uint32_t m24cxx_demo_read() {
+
+    uint8_t rx_buf[M24CXX_READ_PAGE_SIZE];
+
+    // --- READ PASS ---
+    SAFE_PRINTF("Reading %lu kB in %d-byte blocks via m24cxx...\n", M24CXX_SIZE / 1024, M24CXX_READ_PAGE_SIZE);
+
+    uint32_t read_crc = 0;
+    uint32_t start_read_tick = xTaskGetTickCount();
+    uint32_t bytes_read = 0;
+
+    const uint32_t bytes_per_led = M24CXX_SIZE / NUM_LEDS; // 8,192 bytes per LED
+
+    for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_READ_PAGE_SIZE) {
+
+        if (m24cxx_read(&m24cxx_dev, addr, rx_buf, M24CXX_READ_PAGE_SIZE) != M24CXX_OK) {
+            SAFE_PRINTF("\n[ERROR] m24cxx_read failed at 0x%05lX\n", addr);
+            return 0;
+        }
+
+        read_crc = calculate_crc32(rx_buf, M24CXX_READ_PAGE_SIZE, read_crc);
+
+        bytes_read += M24CXX_READ_PAGE_SIZE;
+
+        // Only update the LED when the LAST byte of a full 8 kB block has finished
+        if (bytes_read % bytes_per_led == 0) {
+            uint16_t completed_led = (bytes_read / bytes_per_led) - 1;
+
+            struct ws2812_pixel_t pixel = {
+                .index = completed_led,
+                .red = 0,
+                .green = 20,
+                .blue = 0
+            };
+            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+
+            if (ws2812_refresh_task_handle != NULL) {
+                xTaskNotifyGive(ws2812_refresh_task_handle);
+            }
+        }
+    }
+
+    uint32_t read_elapsed_ms = (xTaskGetTickCount() - start_read_tick) * portTICK_PERIOD_MS;
+    SAFE_PRINTF("Read Complete in %lu ms | CRC32: 0x%08lX\n\n", read_elapsed_ms, read_crc);
+
+    return read_crc;
+}
+
+/**
+ * @brief Demo function to erase data from the M24CXX EEPROM.
+ */
+void m24cxx_demo_erase() {
+
+    // --- ERASE PASS ---
+    SAFE_PRINTF("Erasing %lu kB in %d-byte blocks via m24cxx_erase...\n", M24CXX_SIZE / 1024, M24CXX_WRITE_PAGE_SIZE);
+
+    uint32_t start_erase_tick = xTaskGetTickCount();
+    uint32_t bytes_erased = 0;
+
+    const uint32_t bytes_per_led = M24CXX_SIZE / NUM_LEDS; // 8,192 bytes per LED
+
+    for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_WRITE_PAGE_SIZE) {
+
+        //erase_crc = calculate_crc32(ff_buf, M24CXX_WRITE_PAGE_SIZE, erase_crc);
+
+        if (m24cxx_erase(&m24cxx_dev, addr, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
+            SAFE_PRINTF("\n[ERROR] m24cxx_erase failed at 0x%05lX\n", addr);
+            return;
+        }
+
+        bytes_erased += M24CXX_WRITE_PAGE_SIZE;
+
+        // Only turn OFF the LED when the LAST byte of a full 8 kB block has finished
+        if (bytes_erased % bytes_per_led == 0) {
+            uint16_t completed_led = (bytes_erased / bytes_per_led) - 1;
+
+            struct ws2812_pixel_t pixel = {
+                .index = completed_led,
+                .red = 0,
+                .green = 0,
+                .blue = 0
+            };
+            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+
+            if (ws2812_refresh_task_handle != NULL) {
+                xTaskNotifyGive(ws2812_refresh_task_handle);
+            }
+        }
+    }
+
+    uint32_t erase_elapsed_ms = (xTaskGetTickCount() - start_erase_tick) * portTICK_PERIOD_MS;
+    SAFE_PRINTF("Erase Complete in %lu ms\n\n", erase_elapsed_ms);
+
+    return;
+}
+
+void m24cxx_demo_task(void *pvParameters) {
+
     uint8_t rx_buf[M24CXX_READ_PAGE_SIZE];
 
     SAFE_PRINTF("Starting M24CXX demo task...\n");
@@ -272,73 +427,19 @@ void m24cxx_demo_task(void *pvParameters) {
 
     SAFE_PRINTF("\n=== Starting %lu kB (%s) Memory Benchmark ===\n", M24CXX_SIZE / 1024, M24CXX_TYPE);
 
-    // --- WRITE PASS ---
-    SAFE_PRINTF("Writing %lu kB in %d-byte blocks via m24cxx...\n", M24CXX_SIZE / 1024, M24CXX_WRITE_PAGE_SIZE);
+    uint32_t write_crc = m24cxx_demo_write();
 
-    uint32_t write_crc = 0;
-    uint32_t start_write_tick = xTaskGetTickCount();
-    uint32_t bytes_written = 0;
+    uint32_t read_crc = m24cxx_demo_read();
 
-    for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_WRITE_PAGE_SIZE) {
-
-        for (uint32_t i = 0; i < M24CXX_WRITE_PAGE_SIZE; i++) {
-            tx_buf[i] = (uint8_t)((addr + i) ^ 0xA5);
-        }
-
-        write_crc = calculate_crc32(tx_buf, M24CXX_WRITE_PAGE_SIZE, write_crc);
-
-        if (m24cxx_write(&m24cxx_dev, addr, tx_buf, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
-            SAFE_PRINTF("\n[ERROR] m24cxx_write failed at 0x%05lX\n", addr);
-            return;
-        }
-
-        bytes_written += M24CXX_WRITE_PAGE_SIZE;
-
-        // Calculate which LED should be illuminated (0 to 63)
-        uint16_t current_led = (bytes_written * NUM_LEDS) / M24CXX_SIZE;
-
-        // Ensure bounds safety
-        if (current_led >= NUM_LEDS) {
-            current_led = NUM_LEDS - 1;
-        }
-
-        // Send pixel update
-        struct ws2812_pixel_t pixel = {
-            .index = current_led,
-            .red = 0,
-            .green = 0,
-            .blue = 20
-        };
-        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-
-        // Signal refresh task to trigger DMA transfer once full frame is queued
-        if (ws2812_refresh_task_handle != NULL) {
-            xTaskNotifyGive(ws2812_refresh_task_handle);
-        }
+    if (write_crc != read_crc) {
+        SAFE_PRINTF("[ERROR] CRC32 mismatch: Write CRC = 0x%08lX, Read CRC = 0x%08lX\n", write_crc, read_crc);
+    } else {
+        SAFE_PRINTF("CRC32 match: 0x%08lX\n", write_crc);
     }
 
-    uint32_t write_elapsed_ms = (xTaskGetTickCount() - start_write_tick) * portTICK_PERIOD_MS;
-    SAFE_PRINTF("Write Complete in %lu ms | CRC32: 0x%08lX\n\n", write_elapsed_ms, write_crc);
+    m24cxx_demo_erase();
 
     SAFE_PRINTF("Ending M24CXX demo task...\n");
-
-    for (int i = 0; i < NUM_LEDS; i++) {
-        struct ws2812_pixel_t pixel = {
-            .index = i,
-            .red = 0,
-            .green = 0,
-            .blue = 0
-        };
-        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
-    }
-
-    // Signal refresh task to trigger DMA transfer once full frame is queued
-    if (ws2812_refresh_task_handle != NULL) {
-        xTaskNotifyGive(ws2812_refresh_task_handle);
-    }
-
-    // Clear the task handle so Core 1 knows it can re-create it
-    // m24cxx_demo_task_handle = NULL;
 
     // Correct way to exit a FreeRTOS task:
     vTaskDelete(NULL);
