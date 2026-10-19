@@ -236,7 +236,6 @@ int main() {
 
     // Benchmark test size: Change to 16 * 1024 for quick 16 kB test, or M24CXX_SIZE for full 512 kB benchmark
     run_m24cxx_demo(&m24cxx_dev, M24CXX_SIZE);
-    // run_m24cxx_demo(&m24cxx_dev, 16 * 1024);
 
     uint32_t erase_start_tick = systick;
     printf("\nErasing entire %s memory (%lu kB)...\n", M24CXX_TYPE, M24CXX_SIZE / 1024);

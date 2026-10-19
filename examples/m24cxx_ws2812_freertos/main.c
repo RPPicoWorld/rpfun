@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief Using FreeRTOS to drive a WS2812 LED matrix on the RP2350 microcontroller.
+ * @brief Write M24M01 EEPROM data in a FreeRTOS task while showing progress on a WS2812 LED matrix.
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
@@ -52,7 +52,7 @@
 #define WS2812_PIN 12
 #define IS_RGBW false
 
-#define LED_INTENSITY 5
+#define LED_INTENSITY 15
 
 // #define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
 // #define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
@@ -69,12 +69,17 @@
     } while (0)
 
 // Define a structure to represent a WS2812 pixel with its index and RGB color components
-struct ws2812_pixel_t {
+typedef struct ws2812_pixel_t {
     uint16_t index; // Index of the LED in the strip (0 to NUM_LEDS-1)
     uint8_t red;    // Red component (0-255)
     uint8_t green;  // Green component (0-255)
     uint8_t blue;   // Blue component (0-255)
 };
+
+struct ws2812_pixel_t r = { 0, LED_INTENSITY, 0, 0 }; // Red pixel at index 0
+struct ws2812_pixel_t g = { 1, 0, LED_INTENSITY, 0 }; // Green pixel at index 1
+struct ws2812_pixel_t b = { 2, 0, 0, LED_INTENSITY }; // Blue pixel at index 2
+struct ws2812_pixel_t off = { 0, 0, 0, 0 };           // Off pixel (black) at index 0
 
 m24cxx_t m24cxx_dev;
 
@@ -282,13 +287,8 @@ uint32_t m24cxx_demo_write() {
         if (bytes_written % bytes_per_led == 0) {
             uint16_t completed_led = (bytes_written / bytes_per_led) - 1;
 
-            struct ws2812_pixel_t pixel = {
-                .index = completed_led,
-                .red = 0,
-                .green = 0,
-                .blue = LED_INTENSITY
-            };
-            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            b.index = completed_led;
+            xQueueSend(ws2812_queue, &b, portMAX_DELAY);
 
             if (ws2812_refresh_task_handle != NULL) {
                 xTaskNotifyGive(ws2812_refresh_task_handle);
@@ -334,13 +334,8 @@ uint32_t m24cxx_demo_read() {
         if (bytes_read % bytes_per_led == 0) {
             uint16_t completed_led = (bytes_read / bytes_per_led) - 1;
 
-            struct ws2812_pixel_t pixel = {
-                .index = completed_led,
-                .red = 0,
-                .green = LED_INTENSITY,
-                .blue = 0
-            };
-            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            g.index = completed_led;
+            xQueueSend(ws2812_queue, &g, portMAX_DELAY);
 
             if (ws2812_refresh_task_handle != NULL) {
                 xTaskNotifyGive(ws2812_refresh_task_handle);
@@ -382,13 +377,9 @@ void m24cxx_demo_erase() {
         if (bytes_erased % bytes_per_led == 0) {
             uint16_t completed_led = (bytes_erased / bytes_per_led) - 1;
 
-            struct ws2812_pixel_t pixel = {
-                .index = completed_led,
-                .red = 0,
-                .green = 0,
-                .blue = 0
-            };
-            xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+            off.index = completed_led;
+
+            xQueueSend(ws2812_queue, &off, portMAX_DELAY);
 
             if (ws2812_refresh_task_handle != NULL) {
                 xTaskNotifyGive(ws2812_refresh_task_handle);
@@ -409,13 +400,8 @@ void m24cxx_demo_task(void *pvParameters) {
     SAFE_PRINTF("Starting M24CXX demo task...\n");
 
     for (int i = 0; i < NUM_LEDS; i++) {
-        struct ws2812_pixel_t pixel = {
-            .index = i,
-            .red = LED_INTENSITY,
-            .green = 0,
-            .blue = 0
-        };
-        xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
+        r.index = i;
+        xQueueSend(ws2812_queue, &r, portMAX_DELAY);
     }
 
     // Signal refresh task to trigger DMA transfer once full frame is queued
