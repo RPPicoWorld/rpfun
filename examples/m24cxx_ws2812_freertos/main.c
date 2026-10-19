@@ -52,11 +52,13 @@
 #define WS2812_PIN 12
 #define IS_RGBW false
 
-#define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
-#define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
+#define LED_INTENSITY 5
+
+// #define WS2812_FRAME_DELAY 20    // 20ms update interval (~50 FPS)
+// #define PATTERN_SWAP_DELAY 10000 // Switch pattern every 10 seconds
 
 // Max brightness factor (0 = off, 255 = 100% full brightness)
-#define MAX_BRIGHTNESS 64 // ~25% brightness
+// #define MAX_BRIGHTNESS 64 // ~25% brightness
 
 #define SAFE_PRINTF(fmt, ...)                                        \
     do {                                                             \
@@ -215,13 +217,9 @@ void ws2812_queue_receive_task(void *pvParameters) {
         struct ws2812_pixel_t pixel;
 
         if (xQueueReceive(ws2812_queue, &pixel, portMAX_DELAY) == pdPASS) {
-            // Apply brightness scaling
-            uint8_t r = (pixel.red * MAX_BRIGHTNESS) >> 8;
-            uint8_t g = (pixel.green * MAX_BRIGHTNESS) >> 8;
-            uint8_t b = (pixel.blue * MAX_BRIGHTNESS) >> 8;
 
             // Pack 24-bit GRB value
-            uint32_t grb = ((uint32_t)g << 16) | ((uint32_t)r << 8) | (uint32_t)b;
+            uint32_t grb = ((uint32_t)pixel.green << 16) | ((uint32_t)pixel.red << 8) | (uint32_t)pixel.blue;
 
             // Align to upper 24 bits for the PIO state machine
             if (pixel.index < NUM_LEDS) {
@@ -288,7 +286,7 @@ uint32_t m24cxx_demo_write() {
                 .index = completed_led,
                 .red = 0,
                 .green = 0,
-                .blue = 20
+                .blue = LED_INTENSITY
             };
             xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
 
@@ -339,7 +337,7 @@ uint32_t m24cxx_demo_read() {
             struct ws2812_pixel_t pixel = {
                 .index = completed_led,
                 .red = 0,
-                .green = 20,
+                .green = LED_INTENSITY,
                 .blue = 0
             };
             xQueueSend(ws2812_queue, &pixel, portMAX_DELAY);
@@ -371,7 +369,7 @@ void m24cxx_demo_erase() {
 
     for (uint32_t addr = 0; addr < M24CXX_SIZE; addr += M24CXX_WRITE_PAGE_SIZE) {
 
-        //erase_crc = calculate_crc32(ff_buf, M24CXX_WRITE_PAGE_SIZE, erase_crc);
+        // erase_crc = calculate_crc32(ff_buf, M24CXX_WRITE_PAGE_SIZE, erase_crc);
 
         if (m24cxx_erase(&m24cxx_dev, addr, M24CXX_WRITE_PAGE_SIZE) != M24CXX_OK) {
             SAFE_PRINTF("\n[ERROR] m24cxx_erase failed at 0x%05lX\n", addr);
@@ -413,7 +411,7 @@ void m24cxx_demo_task(void *pvParameters) {
     for (int i = 0; i < NUM_LEDS; i++) {
         struct ws2812_pixel_t pixel = {
             .index = i,
-            .red = 20,
+            .red = LED_INTENSITY,
             .green = 0,
             .blue = 0
         };
@@ -525,7 +523,7 @@ void core1_entry_task(void *pvParameters) {
             xTaskCreate(
                 m24cxx_demo_task,
                 "M24CXXDemoTask",
-                configMINIMAL_STACK_SIZE + 1024,
+                configMINIMAL_STACK_SIZE + 256,
                 NULL,
                 2,
                 &m24cxx_demo_task_handle);
@@ -668,15 +666,6 @@ int main() {
         NULL,
         2,
         &ws2812_refresh_task_handle);
-
-    // // Create the WS2812 Animation Demo Task
-    // xTaskCreate(
-    //     ws2812_demo_task,
-    //     "WSDemoTask",
-    //     configMINIMAL_STACK_SIZE + 256,
-    //     NULL,
-    //     2,
-    //     &ws2812_demo_task_handle);
 
     // Core 0 Task
     TaskHandle_t core0_handle = NULL;
