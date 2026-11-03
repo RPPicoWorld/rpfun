@@ -60,15 +60,15 @@ static struct repeating_timer dhcp_timer;
 // -----------------------------------------------------------------------------
 // Prototypes
 // -----------------------------------------------------------------------------
-void Print_Network_Info(void);
-void Callback_IPAssigned(void);
-void Callback_IPConflict(void);
+void print_network_info(void);
+void callback_ip_assigned(void);
+void callback_ip_conflict(void);
 bool dhcp_timer_callback(struct repeating_timer *t);
 void fetch_nist_daytime(void);
 
 /**
  * @brief Callback for the repeating timer.
- * Works on both ARM and RISC-V.
+ * @details Works on both ARM and RISC-V.
  */
 bool on_timer_tick(struct repeating_timer *t) {
     (void)t;
@@ -103,7 +103,7 @@ void pico_toggle_led(void) {
 // -----------------------------------------------------------------------------
 // Helper & Callbacks Implementation
 // -----------------------------------------------------------------------------
-void Print_Network_Info(void) {
+void print_network_info(void) {
     wiz_NetInfo netInfo;
     wizchip_getnetinfo(&netInfo);
     printf("\n--- Network Configured via DHCP ---\n");
@@ -117,7 +117,7 @@ void Print_Network_Info(void) {
 /**
  * @brief Callback invoked when DHCP successfully retrieves an IP address
  */
-void Callback_IPAssigned(void) {
+void callback_ip_assigned(void) {
     // Retrieve acquired network parameters from DHCP engine
     getIPfromDHCP(g_net_info.ip);
     getGWfromDHCP(g_net_info.gw);
@@ -130,13 +130,13 @@ void Callback_IPAssigned(void) {
 
     dhcp_allocated = 1;
     printf("[DHCP SUCCESS] IP Address Lease Acquired!\n");
-    Print_Network_Info();
+    print_network_info();
 }
 
 /**
  * @brief Callback invoked if IP conflict is detected on network
  */
-void Callback_IPConflict(void) {
+void callback_ip_conflict(void) {
     dhcp_allocated = 0;
     printf("[DHCP ERROR] IP Conflict Detected!\n");
 }
@@ -269,7 +269,7 @@ int main(void) {
     DHCP_init(DHCP_SOCKET, dhcp_buffer);
 
     // Register DHCP Callbacks
-    reg_dhcp_cbfunc(Callback_IPAssigned, Callback_IPAssigned, Callback_IPConflict);
+    reg_dhcp_cbfunc(callback_ip_assigned, callback_ip_assigned, callback_ip_conflict);
 
     // Start 1-second repeating hardware timer for DHCP ticks
     add_repeating_timer_ms(1000, dhcp_timer_callback, NULL, &dhcp_timer);

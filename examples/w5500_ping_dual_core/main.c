@@ -61,9 +61,9 @@ static struct repeating_timer dhcp_timer;
 // -----------------------------------------------------------------------------
 // Prototypes
 // -----------------------------------------------------------------------------
-void Print_Network_Info(void);
-void Callback_IPAssigned(void);
-void Callback_IPConflict(void);
+void print_network_info(void);
+void callback_ip_assigned(void);
+void callback_ip_conflict(void);
 bool dhcp_timer_callback(struct repeating_timer *t);
 void fetch_nist_daytime(void);
 void core1_entry(void);
@@ -105,7 +105,7 @@ void pico_toggle_led(void) {
 // -----------------------------------------------------------------------------
 // Helper & Callbacks Implementation
 // -----------------------------------------------------------------------------
-void Print_Network_Info(void) {
+void print_network_info(void) {
     wiz_NetInfo netInfo;
     wizchip_getnetinfo(&netInfo);
     printf("\n--- Network Configured via DHCP ---\n");
@@ -119,7 +119,7 @@ void Print_Network_Info(void) {
 /**
  * @brief Callback invoked when DHCP successfully retrieves an IP address
  */
-void Callback_IPAssigned(void) {
+void callback_ip_assigned(void) {
     // Retrieve acquired network parameters from DHCP engine
     getIPfromDHCP(g_net_info.ip);
     getGWfromDHCP(g_net_info.gw);
@@ -131,16 +131,16 @@ void Callback_IPAssigned(void) {
     wizchip_setnetinfo(&g_net_info);
 
     dhcp_allocated = 1;
-    printf("[Core 1] [DHCP SUCCESS] IP Address Lease Acquired!\n");
-    Print_Network_Info();
+    printf("[CORE1] [DHCP SUCCESS] IP Address Lease Acquired!\n");
+    print_network_info();
 }
 
 /**
  * @brief Callback invoked if IP conflict is detected on network
  */
-void Callback_IPConflict(void) {
+void callback_ip_conflict(void) {
     dhcp_allocated = 0;
-    printf("[Core 1] [DHCP ERROR] IP Conflict Detected!\n");
+    printf("[CORE1] [DHCP ERROR] IP Conflict Detected!\n");
 }
 
 /**
@@ -164,7 +164,7 @@ void fetch_nist_daytime(void) {
 
     // 2. Open TCP socket
     if (socket(nist_socket, Sn_MR_TCP, 8000, 0) != nist_socket) {
-        printf("[Core 1] [TIME] Failed to open socket\n");
+        printf("[CORE1] [TIME] Failed to open socket\n");
         return;
     }
 
@@ -177,7 +177,7 @@ void fetch_nist_daytime(void) {
         if (getSn_RX_RSR(nist_socket) > 0)
             break; // NIST sent payload early
         if (systick >= timeout) {
-            printf("[Core 1] [TIME] Connection timeout (SR=0x%02X)\n", getSn_SR(nist_socket));
+            printf("[CORE1] [TIME] Connection timeout (SR=0x%02X)\n", getSn_SR(nist_socket));
             close(nist_socket);
             return;
         }
@@ -190,7 +190,7 @@ void fetch_nist_daytime(void) {
         if (sr == SOCK_CLOSED || sr == SOCK_CLOSE_WAIT)
             break;
         if (systick >= timeout) {
-            printf("[Core 1] [TIME] Receive timeout (SR=0x%02X, RX_RSR=%d)\n", getSn_SR(nist_socket), getSn_RX_RSR(nist_socket));
+            printf("[CORE1] [TIME] Receive timeout (SR=0x%02X, RX_RSR=%d)\n", getSn_SR(nist_socket), getSn_RX_RSR(nist_socket));
             close(nist_socket);
             return;
         }
@@ -212,9 +212,9 @@ void fetch_nist_daytime(void) {
             p++;
         }
 
-        printf("[Core 1] [NIST TIME] %s", p);
+        printf("[CORE1] [NIST TIME] %s", p);
     } else {
-        printf("[Core 1] [TIME] No data received (SR=0x%02X)\n", getSn_SR(nist_socket));
+        printf("[CORE1] [TIME] No data received (SR=0x%02X)\n", getSn_SR(nist_socket));
     }
 
     // 7. Clean disconnect and close
@@ -226,29 +226,29 @@ void fetch_nist_daytime(void) {
 // Core 1 Main Task (Handles Ethernet, DHCP State Machine, and NIST Polling)
 // -----------------------------------------------------------------------------
 void core1_entry(void) {
-    printf("[Core 1] Booting Ethernet Stack...\n");
+    printf("[CORE1] Booting Ethernet Stack...\n");
 
     // Initialize W5500 hardware and registered SPI callbacks on Core 1
     if (W5500_Init(&g_net_info) != 0) {
-        printf("[Core 1] [ERROR] W5500 Init Failed!\n");
+        printf("[CORE1] [ERROR] W5500 Init Failed!\n");
         while (1) {
             tight_loop_contents();
         }
     }
 
-    printf("[Core 1] [W5500] Init OK. Version Register: 0x%02X\n", getVERSIONR());
+    printf("[CORE1] [W5500] Init OK. Version Register: 0x%02X\n", getVERSIONR());
 
     // Initialize DHCP Client module
     DHCP_init(DHCP_SOCKET, dhcp_buffer);
 
     // Register DHCP Callbacks
-    reg_dhcp_cbfunc(Callback_IPAssigned, Callback_IPAssigned, Callback_IPConflict);
+    reg_dhcp_cbfunc(callback_ip_assigned, callback_ip_assigned, callback_ip_conflict);
 
     // Start 1-second repeating hardware timer for DHCP ticks
     add_repeating_timer_ms(1000, dhcp_timer_callback, NULL, &dhcp_timer);
-    printf("[Core 1] [SYS] Repeating timer started.\n");
+    printf("[CORE1] [SYS] Repeating timer started.\n");
 
-    printf("[Core 1] [DHCP] Starting DHCP State Machine...\n");
+    printf("[CORE1] [DHCP] Starting DHCP State Machine...\n");
 
     uint32_t now, loop_cnt = 0, next_tick = TICK_DELAY, next_time_poll = 10000;
     uint8_t dhcp_state = 0, last_dhcp_state = 0xFF;
@@ -263,14 +263,14 @@ void core1_entry(void) {
             if (dhcp_state != last_dhcp_state) {
                 switch (dhcp_state) {
                 case DHCP_RUNNING:
-                    printf("[Core 1] [DHCP] Discovering/Requesting IP...\n");
+                    printf("[CORE1] [DHCP] Discovering/Requesting IP...\n");
                     break;
                 case DHCP_IP_ASSIGN:
                 case DHCP_IP_CHANGED:
                 case DHCP_IP_LEASED:
                     break;
                 case DHCP_FAILED:
-                    printf("[Core 1] [DHCP] Request Failed!\n");
+                    printf("[CORE1] [DHCP] Request Failed!\n");
                     break;
                 }
                 last_dhcp_state = dhcp_state;
@@ -278,13 +278,13 @@ void core1_entry(void) {
         }
 
         if (now >= next_tick) {
-            printf("Core 1 tick %lu (loop = %lu, dhcp_allocated = %d)\n", now, loop_cnt, dhcp_allocated);
+            printf("[CORE1] tick %lu (loop = %lu, dhcp_allocated = %d)\n", now, loop_cnt, dhcp_allocated);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
 
         if (dhcp_allocated && (now >= next_time_poll)) {
-            printf("[Core 1] [TIME] Polling NIST Daytime server...\n");
+            printf("[CORE1] [TIME] Polling NIST Daytime server...\n");
             fetch_nist_daytime();
             next_time_poll = systick + 10000; // Reset timer relative to current systick AFTER execution
         }
@@ -322,7 +322,7 @@ int main(void) {
     // Start the heartbeat (Cross-Platform)
     universal_tick_init();
 
-    printf("Core 0: Launching Core 1 for W5500 Ethernet & DHCP...\n");
+    printf("[CORE0] Launching Core 1 for W5500 Ethernet & DHCP...\n");
     multicore_launch_core1(core1_entry);
 
     uint32_t now, loop_cnt = 0, next_blink = blink_interval_ms, next_tick = TICK_DELAY;
@@ -337,7 +337,7 @@ int main(void) {
         }
 
         if (now >= next_tick) {
-            printf("Core 0 tick %lu (loop = %lu)\n", now, loop_cnt);
+            printf("[CORE0] tick %lu (loop = %lu)\n", now, loop_cnt);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
