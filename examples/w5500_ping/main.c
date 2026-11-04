@@ -14,15 +14,20 @@
 #include "hardware/gpio.h"    // For GPIO control
 #include "hardware/spi.h"     // For SPI communication
 #include "hardware/timer.h"   // Required for hardware timer access
+#include "pico/aon_timer.h"   // For RP2350/RP2354 Always-On Timer (pico_aon_timer library)
 #include "pico/binary_info.h" // For binary information macros
 #include "pico/stdlib.h"      // For sleep and stdio initialization
 
-// Include standard I/O for printf
+// Include standard I/O and time headers
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 // W5500 and networking headers
 #include "dhcp.h"
+#include "dns.h"
 #include "socket.h"
 #include "w5500_spi.h"
 #include "wizchip_conf.h"
@@ -31,8 +36,9 @@
 #define TICK_DELAY 1000 // 1s
 
 #define DHCP_SOCKET 0 // W5500 Socket 0 reserved for DHCP
-#define nist_socket 1
-#define nist_port 13
+#define NIST_SOCKET 1
+#define DNS_SOCKET 2
+#define NIST_PORT 13
 
 // Volatile variable to mimic STM32's uwTick
 static volatile uint32_t systick = 0;
@@ -52,10 +58,13 @@ static wiz_NetInfo g_net_info = {
 };
 
 // NIST Time Server: time.nist.gov (132.163.96.1)
-static uint8_t nist_server_ip[4] = { 132, 163, 96, 1 };
+static uint8_t nist_server_ip[4] = { 0, 0, 0, 0 }; // Resolved dynamically
 
 // Repeating timer struct for DHCP tick
 static struct repeating_timer dhcp_timer;
+
+// Flag indicating if AON timer has been synchronized with NIST
+static bool aon_timer_synced = false;
 
 // -----------------------------------------------------------------------------
 // Prototypes
@@ -65,6 +74,7 @@ void callback_ip_assigned(void);
 void callback_ip_conflict(void);
 bool dhcp_timer_callback(struct repeating_timer *t);
 void fetch_nist_daytime(void);
+bool parse_nist_daytime(const char *str, struct tm *tm_out);
 
 /**
  * @brief Callback for the repeating timer.
@@ -151,57 +161,114 @@ bool dhcp_timer_callback(struct repeating_timer *t) {
 }
 
 /**
+ * @brief Resolves hostname to IP using the W5500 DNS client.
+ * @return true on successful resolution, false on failure.
+ */
+bool resolve_hostname(const char *domain, uint8_t *out_ip) {
+
+    uint8_t dns_buffer[2048];
+
+    // Ensure we have a valid DNS server from DHCP
+    if (g_net_info.dns[0] == 0) {
+        printf("[DNS] Error: No DNS server set!\n");
+        return false;
+    }
+
+    // Initialize WIZnet DNS engine
+    DNS_init(DNS_SOCKET, dns_buffer);
+
+    printf("[DNS] Resolving %s via %d.%d.%d.%d...\n", domain, g_net_info.dns[0], g_net_info.dns[1], g_net_info.dns[2], g_net_info.dns[3]);
+
+    // Execute DNS query (3 retry attempts)
+    int8_t res = DNS_run(g_net_info.dns, (uint8_t *)domain, out_ip);
+
+    if (res == 1) {
+        printf("[DNS] Resolved %s -> %d.%d.%d.%d\n", domain, out_ip[0], out_ip[1], out_ip[2], out_ip[3]);
+        return true;
+    } else {
+        printf("[DNS] Resolution failed for %s (Error code: %d)\n", domain, res);
+        return false;
+    }
+}
+
+/**
+ * @brief Parses NIST daytime format: "JJJJJ YY-MM-DD HH:MM:SS TT L H ADV UTC(NIST) *"
+ */
+bool parse_nist_daytime(const char *str, struct tm *tm_out) {
+    int jj;
+    int yy, mm, dd, hh, min, ss;
+
+    if (sscanf(str, "%d %2d-%2d-%2d %2d:%2d:%2d", &jj, &yy, &mm, &dd, &hh, &min, &ss) == 7) {
+        memset(tm_out, 0, sizeof(struct tm));
+        tm_out->tm_year = (2000 + yy) - 1900; // Years since 1900
+        tm_out->tm_mon = mm - 1;              // Month 0-11
+        tm_out->tm_mday = dd;                 // Day of month 1-31
+        tm_out->tm_hour = hh;
+        tm_out->tm_min = min;
+        tm_out->tm_sec = ss;
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * @brief Connect to NIST server and output time payload using systick
  */
 void fetch_nist_daytime(void) {
     uint8_t rx_buf[128];
     uint32_t timeout;
 
-    // 1. Ensure socket is closed before starting
-    close(nist_socket);
+    if (!resolve_hostname("time.nist.gov", nist_server_ip)) {
+        printf("[TIME] Aborting fetch: DNS lookup failed.\n");
+        return;
+    }
 
-    // 2. Open TCP socket
-    if (socket(nist_socket, Sn_MR_TCP, 8000, 0) != nist_socket) {
+    // Ensure socket is closed before starting
+    close(NIST_SOCKET);
+
+    // Open TCP socket
+    if (socket(NIST_SOCKET, Sn_MR_TCP, 8000, 0) != NIST_SOCKET) {
         printf("[TIME] Failed to open socket\n");
         return;
     }
 
-    // 3. Connect to NIST server
-    connect(nist_socket, nist_server_ip, nist_port);
+    // Connect to NIST server using resolved IP
+    connect(NIST_SOCKET, nist_server_ip, NIST_PORT);
 
-    // 4. Wait for connection or early data arrival (timeout after 2 seconds using systick)
+    // Wait for connection or early data arrival (timeout after 2 seconds using systick)
     timeout = systick + 2000;
-    while (getSn_SR(nist_socket) != SOCK_ESTABLISHED && getSn_SR(nist_socket) != SOCK_CLOSE_WAIT) {
-        if (getSn_RX_RSR(nist_socket) > 0)
+    while (getSn_SR(NIST_SOCKET) != SOCK_ESTABLISHED && getSn_SR(NIST_SOCKET) != SOCK_CLOSE_WAIT) {
+        if (getSn_RX_RSR(NIST_SOCKET) > 0)
             break; // NIST sent payload early
         if (systick >= timeout) {
-            printf("[TIME] Connection timeout (SR=0x%02X)\n", getSn_SR(nist_socket));
-            close(nist_socket);
+            printf("[TIME] Connection timeout (SR=0x%02X)\n", getSn_SR(NIST_SOCKET));
+            close(NIST_SOCKET);
             return;
         }
     }
 
-    // 5. Wait for NIST server to send daytime payload (timeout after 2 seconds using systick)
+    // Wait for NIST server to send daytime payload (timeout after 2 seconds using systick)
     timeout = systick + 2000;
-    while (getSn_RX_RSR(nist_socket) == 0) {
-        uint8_t sr = getSn_SR(nist_socket);
+    while (getSn_RX_RSR(NIST_SOCKET) == 0) {
+        uint8_t sr = getSn_SR(NIST_SOCKET);
         if (sr == SOCK_CLOSED || sr == SOCK_CLOSE_WAIT)
             break;
         if (systick >= timeout) {
-            printf("[TIME] Receive timeout (SR=0x%02X, RX_RSR=%d)\n", getSn_SR(nist_socket), getSn_RX_RSR(nist_socket));
-            close(nist_socket);
+            printf("[TIME] Receive timeout (SR=0x%02X, RX_RSR=%d)\n", getSn_SR(NIST_SOCKET), getSn_RX_RSR(NIST_SOCKET));
+            close(NIST_SOCKET);
             return;
         }
     }
 
-    // 6. Read received time string
-    uint16_t len = getSn_RX_RSR(nist_socket);
+    // Read received time string
+    uint16_t len = getSn_RX_RSR(NIST_SOCKET);
     if (len > 0) {
         if (len > sizeof(rx_buf) - 1) {
             len = sizeof(rx_buf) - 1;
         }
 
-        recv(nist_socket, rx_buf, len);
+        recv(NIST_SOCKET, rx_buf, len);
         rx_buf[len] = '\0';
 
         // Skip leading newlines/spaces if present
@@ -211,13 +278,22 @@ void fetch_nist_daytime(void) {
         }
 
         printf("[NIST TIME] %s", p);
+
+        struct tm parsed_tm;
+        if (parse_nist_daytime((const char *)p, &parsed_tm)) {
+            aon_timer_start_calendar(&parsed_tm);
+            aon_timer_synced = true;
+            printf("[RTC/AON] Synced to NIST: %04d-%02d-%02d %02d:%02d:%02d UTC\n", parsed_tm.tm_year + 1900, parsed_tm.tm_mon + 1, parsed_tm.tm_mday, parsed_tm.tm_hour, parsed_tm.tm_min, parsed_tm.tm_sec);
+        } else {
+            printf("[RTC/AON] Error: Failed to parse NIST time string\n");
+        }
     } else {
-        printf("[TIME] No data received (SR=0x%02X)\n", getSn_SR(nist_socket));
+        printf("[TIME] No data received (SR=0x%02X)\n", getSn_SR(NIST_SOCKET));
     }
 
-    // 7. Clean disconnect and close
-    disconnect(nist_socket);
-    close(nist_socket);
+    // Clean disconnect and close
+    disconnect(NIST_SOCKET);
+    close(NIST_SOCKET);
 }
 
 /**
@@ -279,6 +355,7 @@ int main(void) {
 
     uint32_t now, loop_cnt = 0, next_blink = blink_interval_ms, next_tick = TICK_DELAY, next_time_poll = 10000;
     uint8_t dhcp_state = 0, last_dhcp_state = 0xFF;
+    struct tm current_tm;
 
     while (true) {
 
@@ -311,7 +388,11 @@ int main(void) {
         }
 
         if (now >= next_tick) {
-            printf("Core 0 tick %lu (loop = %lu, dhcp_allocated = %d)\n", now, loop_cnt, dhcp_allocated);
+            if (aon_timer_synced && aon_timer_get_time_calendar(&current_tm)) {
+                printf("[CORE0] tick %lu (loop = %lu, dhcp_allocated = %d) | %04d-%02d-%02d %02d:%02d:%02d\n", now, loop_cnt, dhcp_allocated, current_tm.tm_year + 1900, current_tm.tm_mon + 1, current_tm.tm_mday, current_tm.tm_hour, current_tm.tm_min, current_tm.tm_sec);
+            } else {
+                printf("[CORE0] tick %lu (loop = %lu, dhcp_allocated = %d) | RTC Not Set\n", now, loop_cnt, dhcp_allocated);
+            }
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
         }
@@ -319,7 +400,7 @@ int main(void) {
         if (dhcp_allocated && (now >= next_time_poll)) {
             printf("[TIME] Polling NIST Daytime server...\n");
             fetch_nist_daytime();
-            next_time_poll = systick + 10000; // Reset timer relative to current systick AFTER execution
+            next_time_poll = systick + 60000; // Poll once per minute (60,000 ms)
         }
 
         ++loop_cnt;

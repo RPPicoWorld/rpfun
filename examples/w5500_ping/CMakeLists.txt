@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
+set(sdkVersion 2.3.1)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -40,6 +40,13 @@ project(main C CXX ASM)
 pico_sdk_init()
 
 add_executable(main)
+
+get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+find_program(CMAKE_SIZE_UTIL arm-none-eabi-size HINTS ${TOOLCHAIN_BIN_DIR})
+
+add_custom_command(TARGET main POST_BUILD
+    COMMAND ${CMAKE_SIZE_UTIL} $<TARGET_FILE:main>
+)
 
 # -----------------------------------------------------------------------------
 # W5500 ioLibrary Driver Sources & Headers
@@ -85,6 +92,7 @@ target_compile_definitions(main PRIVATE
 # pull in common dependencies
 target_link_libraries(main 
     pico_stdlib
+    pico_aon_timer
     hardware_spi        # Hardware SPI driver
     hardware_timer      # Repeating timer alarms
     hardware_clocks     # Clock frequency support
