@@ -1,16 +1,15 @@
 /**
  * @file main.c
- * @brief Enabling the second
+ * @brief Dual core and overclocking on the Colibri MCU7 board
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
- * with a focus on cross-platform compatibility between ARM and RISC-V cores.
+ * Bringing up the Colibri MCU7 RP2350 board: overclocking, dual core and a simple LED blink.
  * This example demonstrates:
+ * - Raising the core voltage and system clock
  * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
- * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
  * - Synchronizing access to printf across both cores using a mutex to prevent interleaved output
  *
  */
@@ -119,7 +118,7 @@ int main() {
 
     rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(320000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    set_sys_clock_khz(320000, true); // Set system clock to 320 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 

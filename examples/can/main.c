@@ -1,12 +1,12 @@
 /**
  * @file main.c
- * @brief Using the can2040 library to demonstrate CAN bus functionality on the RP2040, along with a simple LED blink and tick example.
+ * @brief Using the can2040 library to demonstrate CAN bus functionality on the RP2350, along with a simple LED blink and tick example.
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Receive and send CAN messages using the can2040 library on the RP2040. This example demonstrates how to set
+ * Receive and send CAN messages using the can2040 library on the RP2350. This example demonstrates how to set
  * up the CAN bus, handle incoming messages, and transmit messages. It also includes a simple LED blink and
  * tick example to show that the program is running.
  *

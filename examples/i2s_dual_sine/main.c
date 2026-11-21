@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief I2S Dual Sine Waveform Generator Example for RP2350 / RP2040
+ * @brief I2S Dual Sine Waveform Generator Example for RP2350
  * @author STM32World
  * @date 2026
  *

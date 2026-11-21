@@ -1,12 +1,12 @@
 /**
  * @file main.c
- * @brief Handling WS1812 LED strip with PIO on the RP2350
+ * @brief Handling WS2812 LED strip with PIO on the RP2350
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Handling WS1812 LED strip with PIO on the RP2350, along with a simple LED blink and tick example.
+ * Handling WS2812 LED strip with PIO on the RP2350, along with a simple LED blink and tick example.
  * The ws2812 PIO program is auto-generated from ws2812.pio and included in the build.
  *
  */

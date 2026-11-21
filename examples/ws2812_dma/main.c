@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief Overclocking RP2350 with DMA-driven WS2812 Animations
+ * @brief DMA-driven WS2812 Animations
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *

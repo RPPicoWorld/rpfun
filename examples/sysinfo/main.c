@@ -6,11 +6,10 @@
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
- * with a focus on cross-platform compatibility between ARM and RISC-V cores.
+ * Printing system information on the RP2350, built for either the ARM or the RISC-V cores.
  * This example demonstrates:
+ * - Detecting at compile time whether the code runs on Arm Cortex-M33 or RISC-V
  * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
- * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
  * - Synchronizing access to printf across both cores using a mutex to prevent interleaved output
  *
  */
@@ -115,13 +114,13 @@ void core1_entry() {
  */
 int main() {
 
-    vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
+    // vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(VREG_VOLTAGE_1_80); // Set voltage to 1.60V for stable overclocking
+    // vreg_set_voltage(VREG_VOLTAGE_1_80); // Set voltage to 1.80V for stable overclocking
 
-    rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
+    // rom_flash_enter_cmd_xip(); // Enter XIP mode for flash access
 
-    set_sys_clock_khz(540000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
+    // set_sys_clock_khz(540000, true); // Set system clock to 540 MHz, true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
@@ -130,7 +129,8 @@ int main() {
     stdio_init_all(); // Initialize all standard I/O (UART, USB, etc.)
 
     // Explicitly override the baud rate for UART0 to 921600 for better performance with the SDK's printf implementation
-    uart_set_baudrate(uart0, 921600);
+    // uart_set_baudrate(uart0, 921600);
+    uart_set_baudrate(uart0, 2000000);
 
     // Give UART a moment to stabilize
     sleep_ms(50);

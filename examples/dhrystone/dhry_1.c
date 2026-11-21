@@ -28,8 +28,10 @@ void run_dhrystone_benchmark(int number_of_runs, int core_id) {
     boolean bool_glob = false;
     char ch_1_glob = 0;
     char ch_2_glob = 0;
-    arr_1_dim arr_1_glob;
-    arr_2_dim arr_2_glob;
+    // The arrays are about 10 KB, far more than the 2 KB stack each core has, so keep them on the heap.
+    // (On the stack, the two cores' frames overlapped and corrupted each other.)
+    int *arr_1_glob = calloc(1, sizeof(arr_1_dim));
+    int (*arr_2_glob)[50] = calloc(1, sizeof(arr_2_dim));
 
     next_ptr_glob = (rec_pointer)malloc(sizeof(rec_type));
     ptr_glob = (rec_pointer)malloc(sizeof(rec_type));
@@ -126,6 +128,8 @@ void run_dhrystone_benchmark(int number_of_runs, int core_id) {
 
     free(ptr_glob);
     free(next_ptr_glob);
+    free(arr_1_glob);
+    free(arr_2_glob);
 }
 
 void proc_1(rec_pointer ptr_val_par, rec_pointer ptr_glob) {

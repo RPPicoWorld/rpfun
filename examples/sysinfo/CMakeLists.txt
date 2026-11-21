@@ -16,7 +16,7 @@ else()
     set(USERHOME $ENV{HOME})
 endif()
 set(sdkVersion 2.3.1)
-set(toolchainVersion 15_2_Rel1)
+set(toolchainVersion RISCV_PICO_2_3_1_0)
 set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
@@ -24,7 +24,7 @@ if (EXISTS ${picoVscode})
 endif()
 # ====================================================================================
 
-set(PICO_PLATFORM rp2350)
+set(PICO_PLATFORM rp2350-riscv)
 
 # custom board headers
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_SOURCE_DIR}/boards/include" CACHE STRING "Extra board header dirs")
@@ -69,10 +69,11 @@ target_link_libraries(main
     hardware_dma
     hardware_adc
     sysinfo
+    hardware_hazard3
 )
 
 pico_enable_stdio_uart(main 1)
-pico_enable_stdio_usb(main 1)
+pico_enable_stdio_usb(main 0)
 
 # create map/bin/hex file etc.
 pico_add_extra_outputs(main)

@@ -1,16 +1,16 @@
 /**
  * @file main.c
- * @brief Enabling the second
+ * @brief Reading the RP2350 internal temperature sensor
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
- * with a focus on cross-platform compatibility between ARM and RISC-V cores.
+ * Reading the RP2350 internal temperature sensor via the ADC while running on both cores,
+ * used to keep an eye on the die temperature when overclocking.
  * This example demonstrates:
  * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
- * - Redirecting printf to both uart0 and USB CDC for versatile debugging options
+ * - Reading the internal temperature sensor and converting the raw value to Celsius
  * - Synchronizing access to printf across both cores using a mutex to prevent interleaved output
  *
  */

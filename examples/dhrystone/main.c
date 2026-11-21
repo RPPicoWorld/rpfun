@@ -1,12 +1,12 @@
 /**
  * @file main.c
- * @brief Overclocking RP2350
+ * @brief Dual-core Dhrystone benchmark on an overclocked RP2350
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Trying to push the RP2350 to its limits with a simple LED blink and tick example.
+ * Running the Dhrystone benchmark on both cores in parallel at 540 MHz, while monitoring the die temperature.
  *
  */
 
@@ -22,7 +22,7 @@
 #include "pico/bootrom.h"   // For flash command execution
 #include "pico/multicore.h" // For multicore support
 #include "pico/stdlib.h"    // For sleep and stdio initialization
-#include "pico/sync.h"      // For hardware barrier synchronization
+#include "pico/sync.h"      // For mutex support
 
 // Include standard I/O for printf
 #include <stdint.h>
@@ -39,10 +39,28 @@
 #endif
 
 // Define and auto-initialize the global printf mutex
-auto_init_mutex(printf_mutex);
+// (non-static because dhry.h declares it extern for dhry_1.c)
+__attribute__((section(".mutex_array"))) mutex_t printf_mutex;
 
-// Standard SDK hardware barrier instance
-static barrier_t start_barrier;
+#define START_BARRIER_TOKEN 0xdb5a7a27u // Arbitrary token passed through the inter-core FIFO
+
+/**
+ * @brief Two-core start barrier using the inter-core FIFO.
+ *
+ * Core 1 announces it is ready, core 0 waits for that and releases it, so both
+ * cores start the benchmark at (almost) the same moment.
+ */
+static void start_barrier_wait(void) {
+    if (get_core_num() == 1) {
+        multicore_fifo_push_blocking(START_BARRIER_TOKEN);
+        while (multicore_fifo_pop_blocking() != START_BARRIER_TOKEN) {
+        }
+    } else {
+        while (multicore_fifo_pop_blocking() != START_BARRIER_TOKEN) {
+        }
+        multicore_fifo_push_blocking(START_BARRIER_TOKEN);
+    }
+}
 
 volatile uint16_t internal_temp_raw = 0;
 volatile float internal_temp_c = 0.0f;
@@ -117,7 +135,7 @@ void core1_entry(void) {
     mutex_exit(&printf_mutex);
 
     // Synchronize both cores at start barrier
-    barrier_wait(&start_barrier);
+    start_barrier_wait();
 
     // Run Dhrystone benchmark simultaneously on Core 1
     run_dhrystone_benchmark(10000000, 1);
@@ -173,8 +191,6 @@ int main(void) {
     // Give UART a moment to stabilize
     sleep_ms(50);
 
-    // Initialize barrier for 2 cores
-    barrier_init(&start_barrier, 2);
 
     mutex_enter_blocking(&printf_mutex);
     printf("\n\n\nCore 0: Booting...\n");
@@ -201,7 +217,7 @@ int main(void) {
     mutex_exit(&printf_mutex);
 
     // Synchronize Core 0 with Core 1 to ensure parallel start
-    barrier_wait(&start_barrier);
+    start_barrier_wait();
 
     // Run Dhrystone benchmark on Core 0 simultaneously with Core 1
     run_dhrystone_benchmark(10000000, 0);

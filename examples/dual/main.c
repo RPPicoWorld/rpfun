@@ -1,12 +1,12 @@
 /**
  * @file main.c
- * @brief Enabling the second
+ * @brief Enabling the second core on the RP2350
  * @author STM32World <lth@stm32world.com>
  * @date 2026
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Enabling the second core on the Raspberry Pi Pico (RP2040) using the Pico SDK,
+ * Enabling the second core on the RP2350 using the Pico SDK,
  * with a focus on cross-platform compatibility between ARM and RISC-V cores.
  * This example demonstrates:
  * - Creating a 1 ms tick using the SDK's repeating timer, similar to STM32's SysTick
