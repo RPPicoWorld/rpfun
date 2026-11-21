@@ -32,11 +32,11 @@
 
 // Clock and core voltage, normally set from CMake (-DSYS_CLOCK_KHZ=... -DCORE_VOLTAGE=...)
 #ifndef SYS_CLOCK_KHZ
-#define SYS_CLOCK_KHZ 540000
+#define SYS_CLOCK_KHZ 320
 #endif
 
 #ifndef CORE_VOLTAGE
-#define CORE_VOLTAGE VREG_VOLTAGE_1_60
+#define CORE_VOLTAGE VREG_VOLTAGE_1_30
 #endif
 
 #ifndef LED_DELAY
@@ -205,7 +205,6 @@ int main(void) {
 
     // Give UART a moment to stabilize
     sleep_ms(50);
-
 
     mutex_enter_blocking(&printf_mutex);
     printf("\n\n\nCore 0: Booting...\n");
