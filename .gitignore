@@ -1,6 +1,7 @@
 CLAUDE.local.md
 # Exclude build
 build/
+build_*/
 
 # Prerequisites
 *.d
