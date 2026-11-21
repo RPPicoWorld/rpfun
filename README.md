@@ -15,7 +15,7 @@ https://www.youtube.com/@RPPicoWorld
 | 3 | Second Blinky | [blink2](examples/blink2) |
 | 4 | Serial Print | [serial](examples/serial) |
 | 5 | Dual Core Setup | [dual](examples/dual) |
-| 6 | Overclock RP2350 | [overclock](examples/overclock), [dhrystone](examples/dhrystone) |
+| 6 | Overclock RP2350 | [overclock](examples/overclock), [dhrystone_arm](examples/dhrystone_arm), [dhrystone_riscv](examples/dhrystone_riscv), [whetstone_arm](examples/whetstone_arm), [whetstone_riscv](examples/whetstone_riscv), [coremark_arm](examples/coremark_arm), [coremark_riscv](examples/coremark_riscv) |
 | 7 | Extreme Overclock - 540 MHz | [temp](examples/temp) |
 | 8 | FreeRTOS on RP Pico (part 1) | [freertos](examples/freertos) |
 | 9 | FreeRTOS (part 2) - Semaphores, Notifications, Queues and Timers | [freertos2](examples/freertos2), [freertos3](examples/freertos3) |
@@ -45,8 +45,9 @@ set(PICO_PLATFORM rp2350-riscv)   # Hazard3 RISC-V
 ```
 
 plus the matching `toolchainVersion` (an Arm toolchain such as `15_2_Rel1`, or a
-RISC-V one such as `RISCV_PICO_2_3_1_0`). See `dhrystone_arm` / `dhrystone_riscv`
-and `whetstone_arm` / `whetstone_riscv`, which differ only in those lines.
+RISC-V one such as `RISCV_PICO_2_3_1_0`). See `dhrystone_arm` / `dhrystone_riscv`,
+`whetstone_arm` / `whetstone_riscv` and `coremark_arm` / `coremark_riscv`, which
+differ only in those lines.
 
 ### Flashing with a CMSIS-DAP probe (e.g. Hybridlink)
 

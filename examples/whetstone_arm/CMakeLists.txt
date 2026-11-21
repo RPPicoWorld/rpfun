@@ -46,9 +46,9 @@ add_executable(main
     whetstone.c
 )
 
-# Clock and core voltage, override with e.g. -DSYS_CLOCK_KHZ=320000 -DCORE_VOLTAGE=VREG_VOLTAGE_1_30
-set(SYS_CLOCK_KHZ 540000 CACHE STRING "System clock in kHz")
-set(CORE_VOLTAGE VREG_VOLTAGE_1_60 CACHE STRING "Core voltage (vreg_voltage enum name)")
+# Clock and core voltage, stock RP2350 by default; overclock with e.g. -DSYS_CLOCK_KHZ=320000 -DCORE_VOLTAGE=VREG_VOLTAGE_1_30 or -DSYS_CLOCK_KHZ=540000 -DCORE_VOLTAGE=VREG_VOLTAGE_1_60
+set(SYS_CLOCK_KHZ 150000 CACHE STRING "System clock in kHz")
+set(CORE_VOLTAGE VREG_VOLTAGE_1_10 CACHE STRING "Core voltage (vreg_voltage enum name)")
 target_compile_definitions(main PRIVATE
     SYS_CLOCK_KHZ=${SYS_CLOCK_KHZ}
     CORE_VOLTAGE=${CORE_VOLTAGE}

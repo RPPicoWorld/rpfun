@@ -6,7 +6,7 @@
  *
  * Copyright (c) 2026 STM32World <lth@stm32world.com>
  *
- * Running the Dhrystone benchmark on both cores in parallel at 540 MHz, while monitoring the die temperature.
+ * Running the Dhrystone benchmark on both cores in parallel (stock 150 MHz by default, overclock from CMake), while monitoring the die temperature.
  *
  */
 
@@ -32,11 +32,11 @@
 
 // Clock and core voltage, normally set from CMake (-DSYS_CLOCK_KHZ=... -DCORE_VOLTAGE=...)
 #ifndef SYS_CLOCK_KHZ
-#define SYS_CLOCK_KHZ 540000
+#define SYS_CLOCK_KHZ 150000
 #endif
 
 #ifndef CORE_VOLTAGE
-#define CORE_VOLTAGE VREG_VOLTAGE_1_60
+#define CORE_VOLTAGE VREG_VOLTAGE_1_10
 #endif
 
 #ifndef LED_DELAY
@@ -182,7 +182,7 @@ int main(void) {
 
     vreg_disable_voltage_limit(); // Disable voltage limit to allow higher voltages for overclocking
 
-    vreg_set_voltage(CORE_VOLTAGE); // Core voltage, set from CMake (default 1.60V for stable overclocking)
+    vreg_set_voltage(CORE_VOLTAGE); // Core voltage, set from CMake (default 1.10V, the RP2350 stock voltage)
 
     sleep_ms(10); // Give the regulator time to settle before raising the clock
 
@@ -192,7 +192,7 @@ int main(void) {
     rom_flash_enter_cmd_xip();
 #endif
 
-    set_sys_clock_khz(SYS_CLOCK_KHZ, true); // System clock, set from CMake (default 540 MHz), true means to wait for the clock to stabilize
+    set_sys_clock_khz(SYS_CLOCK_KHZ, true); // System clock, set from CMake (default 150 MHz), true means to wait for the clock to stabilize
 
     int rc = pico_led_init(); // Initialize the LED GPIO
 
