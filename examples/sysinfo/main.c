@@ -130,7 +130,7 @@ int main() {
 
     // Explicitly override the baud rate for UART0 to 921600 for better performance with the SDK's printf implementation
     // uart_set_baudrate(uart0, 921600);
-    uart_set_baudrate(uart0, 2000000);
+    uart_set_baudrate(uart0, 921600);
 
     // Give UART a moment to stabilize
     sleep_ms(50);

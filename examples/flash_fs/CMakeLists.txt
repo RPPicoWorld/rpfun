@@ -38,6 +38,14 @@ add_executable(main
     littlefs/lfs_util.c
 )
 
+# Clock and core voltage, stock RP2350 by default; overclock with e.g. -DSYS_CLOCK_KHZ=320000 -DCORE_VOLTAGE=VREG_VOLTAGE_1_30 or -DSYS_CLOCK_KHZ=540000 -DCORE_VOLTAGE=VREG_VOLTAGE_1_60
+set(SYS_CLOCK_KHZ 150000 CACHE STRING "System clock in kHz")
+set(CORE_VOLTAGE VREG_VOLTAGE_1_10 CACHE STRING "Core voltage (vreg_voltage enum name)")
+target_compile_definitions(main PRIVATE
+    SYS_CLOCK_KHZ=${SYS_CLOCK_KHZ}
+    CORE_VOLTAGE=${CORE_VOLTAGE}
+)
+
 pico_add_linker_script_override_path(main "${CMAKE_CURRENT_SOURCE_DIR}/linker_overrides")
 
 get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
