@@ -18,6 +18,10 @@
 /**
  * @brief Mounts the LittleFS filesystem in the flash FS region.
  *
+ * The filesystem can be used from both cores. Once both cores are running, each must have called
+ * multicore_lockout_victim_init(), so it can be paused while the other core writes to flash
+ * (see lfs_port.c).
+ *
  * The filesystem is not formatted here: the FS region must already hold a LittleFS image,
  * e.g. the littlefs.bin built from fs_root/ and flashed at the start of the FS region.
  *

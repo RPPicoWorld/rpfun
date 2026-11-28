@@ -13,12 +13,21 @@
  * Reads go straight through the memory-mapped XIP window. Erase and program use the SDK, with
  * the flash read (XIP) setup saved and restored around each call so they also work when the
  * RP2350 is overclocked (see flash_erase_keep_xip() below).
+ *
+ * The filesystem can be used from both cores:
+ * - LittleFS is built with LFS_THREADSAFE, and the lock/unlock callbacks below use a mutex, so
+ *   only one core at a time is inside a LittleFS call.
+ * - While one core erases or programs the flash, the other core is paused (multicore lockout),
+ *   as it would crash if it tried to fetch code from flash in the meantime. For this the other
+ *   core must have called multicore_lockout_victim_init() first.
  */
 
 #include "lfs_port.h"
 #include "hardware/flash.h"       // flash_range_erase(), flash_range_program(), flash_flush_cache()
 #include "hardware/structs/qmi.h" // QMI (flash interface) registers
 #include "hardware/sync.h"        // save_and_disable_interrupts()
+#include "pico/multicore.h"       // multicore_lockout_*() to pause the other core during erase/program
+#include "pico/mutex.h"           // Mutex for the LittleFS lock/unlock callbacks
 #include "pico/stdlib.h"
 #include <string.h>
 
@@ -66,6 +75,7 @@ static int lfs_pico_read(const struct lfs_config *c, lfs_block_t block, lfs_off_
  *
  * The wrappers must run from RAM, as flash can't be read while it is being erased/programmed,
  * and interrupts are disabled so no interrupt handler tries to run from flash in the meantime.
+ * The other core is paused by the callers (see other_core_pause()).
  */
 
 /**
@@ -130,6 +140,34 @@ static void __no_inline_not_in_flash_func(flash_program_keep_xip)(uint32_t flash
 }
 
 /**
+ * @brief Pauses the other core, if it is running and has opted in to being paused.
+ *
+ * The other core is parked in a RAM-resident interrupt handler until other_core_resume(), so it
+ * doesn't fetch code from flash while flash is being erased or programmed. Before core 1 has
+ * been launched (and has called multicore_lockout_victim_init()) there is nothing to pause.
+ *
+ * @return bool True if the other core was paused and must be resumed afterwards.
+ */
+static bool other_core_pause(void) {
+    if (!multicore_lockout_victim_is_initialized(get_core_num() ^ 1)) {
+        return false;
+    }
+    multicore_lockout_start_blocking();
+    return true;
+}
+
+/**
+ * @brief Lets the other core run again after other_core_pause().
+ *
+ * @param paused The value returned by other_core_pause().
+ */
+static void other_core_resume(bool paused) {
+    if (paused) {
+        multicore_lockout_end_blocking();
+    }
+}
+
+/**
  * @brief LittleFS program callback: writes data to an already erased part of a block.
  *
  * @param c LittleFS configuration (gives the block size).
@@ -141,7 +179,9 @@ static void __no_inline_not_in_flash_func(flash_program_keep_xip)(uint32_t flash
  */
 static int lfs_pico_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, const void *buffer, lfs_size_t size) {
     uint32_t flash_offset = FS_FLASH_OFFSET + (block * c->block_size) + off;
+    bool paused = other_core_pause();
     flash_program_keep_xip(flash_offset, (const uint8_t *)buffer, size);
+    other_core_resume(paused);
     return LFS_ERR_OK;
 }
 
@@ -154,7 +194,9 @@ static int lfs_pico_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_
  */
 static int lfs_pico_erase(const struct lfs_config *c, lfs_block_t block) {
     uint32_t flash_offset = FS_FLASH_OFFSET + (block * c->block_size);
+    bool paused = other_core_pause();
     flash_erase_keep_xip(flash_offset, c->block_size);
+    other_core_resume(paused);
     return LFS_ERR_OK;
 }
 
@@ -169,12 +211,41 @@ static int lfs_pico_sync(const struct lfs_config *c) {
     return LFS_ERR_OK;
 }
 
+// Only one core at a time may be inside a LittleFS call
+auto_init_mutex(lfs_port_mutex);
+
+/**
+ * @brief LittleFS lock callback (LFS_THREADSAFE): waits for exclusive use of the filesystem.
+ *
+ * @param c LittleFS configuration (unused).
+ * @return int Always LFS_ERR_OK.
+ */
+static int lfs_pico_lock(const struct lfs_config *c) {
+    (void)c;
+    mutex_enter_blocking(&lfs_port_mutex);
+    return LFS_ERR_OK;
+}
+
+/**
+ * @brief LittleFS unlock callback (LFS_THREADSAFE): releases the filesystem again.
+ *
+ * @param c LittleFS configuration (unused).
+ * @return int Always LFS_ERR_OK.
+ */
+static int lfs_pico_unlock(const struct lfs_config *c) {
+    (void)c;
+    mutex_exit(&lfs_port_mutex);
+    return LFS_ERR_OK;
+}
+
 // LittleFS configuration; block_count, cache_size and lookahead_size are filled in by lfs_port_init()
 static struct lfs_config cfg = {
     .read = lfs_pico_read,
     .prog = lfs_pico_prog,
     .erase = lfs_pico_erase,
     .sync = lfs_pico_sync,
+    .lock = lfs_pico_lock,
+    .unlock = lfs_pico_unlock,
 
     .read_size = FS_READ_SIZE,
     .prog_size = FS_PROG_SIZE,
