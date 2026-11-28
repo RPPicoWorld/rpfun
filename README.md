@@ -31,6 +31,8 @@ https://www.youtube.com/@RPPicoWorld
 | 19 | SPI Flash (W25Qxx) | - |
 | 20 | W5500 SPI Ethernet | [w5500_ping](examples/w5500_ping), [w5500_ping_dual_core](examples/w5500_ping_dual_core) |
 | 21 | Hybridlink Open Source Programmer and Debugger | - |
+| 22 | RP2350 vs STM32, ESP32 & Arduino – Real Benchmarks ([wiki](https://stm32world.com/wiki/Comparing_STM32_and_RP2350_Performance)) | [dhrystone_arm](examples/dhrystone_arm), [dhrystone_riscv](examples/dhrystone_riscv), [whetstone_arm](examples/whetstone_arm), [whetstone_riscv](examples/whetstone_riscv), [coremark_arm](examples/coremark_arm), [coremark_riscv](examples/coremark_riscv) |
+| 23 | 624 MHz Overclock ([wiki](https://stm32world.com/wiki/RP2350_Extreme_Overclock)) | [extreme_overclock](examples/extreme_overclock) |
 
 ## Switching between Arm and RISC-V
 
