@@ -58,6 +58,12 @@ target_compile_options(main PRIVATE
     -O3
     -ffunction-sections 
     -fdata-sections
+    # Start functions, loops and branch targets on 4-byte boundaries, so loop timing doesn't
+    # depend on where the code lands (a 4-byte RISC-V instruction across a word boundary costs a cycle)
+    -falign-functions=4
+    -falign-loops=4
+    -falign-jumps=4
+    -falign-labels=4
 )
 
 # pull in common dependencies
@@ -67,7 +73,6 @@ target_link_libraries(main
     hardware_flash
     hardware_dma
     hardware_adc
-    #hardware_hazard3
 )
 
 pico_enable_stdio_uart(main 1)

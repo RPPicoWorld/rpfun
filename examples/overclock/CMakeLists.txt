@@ -15,16 +15,16 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.3.0)
-set(toolchainVersion 15_2_Rel1)
-set(picotoolVersion 2.3.0)
+set(sdkVersion 2.3.1)
+set(toolchainVersion RISCV_PICO_2_3_0_1)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
 
-set(PICO_PLATFORM rp2350)
+set(PICO_PLATFORM rp2350-riscv)
 
 # custom board headers
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_SOURCE_DIR}/boards/include" CACHE STRING "Extra board header dirs")
@@ -50,6 +50,12 @@ target_compile_options(main PRIVATE
     -O3
     -ffunction-sections 
     -fdata-sections
+    # Start functions, loops and branch targets on 4-byte boundaries, so loop timing doesn't
+    # depend on where the code lands (a 4-byte RISC-V instruction across a word boundary costs a cycle)
+    -falign-functions=4
+    -falign-loops=4
+    -falign-jumps=4
+    -falign-labels=4
 )
 
 # pull in common dependencies
