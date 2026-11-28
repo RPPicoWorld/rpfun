@@ -23,18 +23,18 @@
 
 // Include necessary headers from the Pico SDK
 
-#include "hardware/adc.h"    // For ADC access (if needed)
-#include "hardware/clocks.h" // For clock frequency information
-#include "hardware/dma.h"    // For DMA access (if needed)
-#include "hardware/flash.h"  // For flash_flush_cache()
-#include "hardware/gpio.h"  // For GPIO control
+#include "hardware/adc.h"         // For ADC access (if needed)
+#include "hardware/clocks.h"      // For clock frequency information
+#include "hardware/dma.h"         // For DMA access (if needed)
+#include "hardware/flash.h"       // For flash_flush_cache()
+#include "hardware/gpio.h"        // For GPIO control
 #include "hardware/structs/qmi.h" // QMI (flash interface) registers, for the flash clock divider
-#include "hardware/sync.h"  // save_and_disable_interrupts()
-#include "hardware/timer.h" // Required for hardware timer access
-#include "hardware/vreg.h"  // Needed for voltage scaling
-#include "pico/bootrom.h"   // For flash command execution
-#include "pico/multicore.h" // For multicore support
-#include "pico/stdlib.h"    // For sleep and stdio initialization
+#include "hardware/sync.h"        // save_and_disable_interrupts()
+#include "hardware/timer.h"       // Required for hardware timer access
+#include "hardware/vreg.h"        // Needed for voltage scaling
+#include "pico/bootrom.h"         // For flash command execution
+#include "pico/multicore.h"       // For multicore support
+#include "pico/stdlib.h"          // For sleep and stdio initialization
 
 // Include standard I/O for printf
 #include <stdint.h>
@@ -54,7 +54,7 @@
 // 10, and the smallest working read delay only depends on the flash clock (about 90 MHz needs 1,
 // 104 MHz needs 2, 124 MHz needs 3). So 90 MHz with read delay 4 leaves margin on both sides.
 #define XIP_MAX_KHZ 90000
-#define XIP_CLKDIV_MIN 3 // The boot setup's divider, never go faster than that
+#define XIP_CLKDIV_MIN 3                                                  // The boot setup's divider, never go faster than that
 #define XIP_CLKDIV_CALC ((SYS_CLOCK_KHZ + XIP_MAX_KHZ - 1) / XIP_MAX_KHZ) // Round up
 #define XIP_CLKDIV (XIP_CLKDIV_CALC > XIP_CLKDIV_MIN ? XIP_CLKDIV_CALC : XIP_CLKDIV_MIN)
 #define XIP_RXDELAY 4 // Read data sample delay, in half system clock cycles
@@ -259,8 +259,8 @@ int main() {
             float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
             internal_temp_c = temp_base - (voltage - slope_offset) / slope;
 
-            mutex_enter_blocking(&printf_mutex); // Ensure we've got exclusive access to printf
-            printf("Core 0 tick %lu (loop = %lu raw = %u c = %.2f)\n", now, loop_cnt, (unsigned int)internal_temp_raw, internal_temp_c);
+            mutex_enter_blocking(&printf_mutex);                                                     // Ensure we've got exclusive access to printf
+            printf("Core 0 tick %lu (loop = %lu temp = %.2f °C)\n", now, loop_cnt, internal_temp_c); // ° = degree sign, sent as UTF-8
             mutex_exit(&printf_mutex);
             loop_cnt = 0;
             next_tick = now + TICK_DELAY;
@@ -269,7 +269,6 @@ int main() {
         ++loop_cnt;
 
         tight_loop_contents(); // Allow other tasks to run and prevent CPU hogging
-
     }
 }
 

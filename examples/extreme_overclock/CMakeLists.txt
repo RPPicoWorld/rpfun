@@ -15,16 +15,16 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.3.0)
-set(toolchainVersion 15_2_Rel1)
-set(picotoolVersion 2.3.0)
+set(sdkVersion 2.3.1)
+set(toolchainVersion RISCV_PICO_2_3_1_0)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
 
-set(PICO_PLATFORM rp2350)
+set(PICO_PLATFORM rp2350-riscv)
 
 # custom board headers
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_SOURCE_DIR}/boards/include" CACHE STRING "Extra board header dirs")
@@ -46,8 +46,8 @@ add_executable(main
 )
 
 # Clock and core voltage; push higher with e.g. -DSYS_CLOCK_KHZ=600000 -DCORE_VOLTAGE=VREG_VOLTAGE_2_00
-set(SYS_CLOCK_KHZ 540000 CACHE STRING "System clock in kHz")
-set(CORE_VOLTAGE VREG_VOLTAGE_1_60 CACHE STRING "Core voltage (vreg_voltage enum name)")
+set(SYS_CLOCK_KHZ 624000 CACHE STRING "System clock in kHz")
+set(CORE_VOLTAGE VREG_VOLTAGE_2_00 CACHE STRING "Core voltage (vreg_voltage enum name)")
 target_compile_definitions(main PRIVATE
     SYS_CLOCK_KHZ=${SYS_CLOCK_KHZ}
     CORE_VOLTAGE=${CORE_VOLTAGE}
