@@ -111,8 +111,8 @@ void pico_toggle_led() {
 
 // This timer callback fires automatically in the background
 bool repeating_timer_callback(struct repeating_timer *t) {
-    // Explicitly select channel 8 for RP2354B/RP2350B variants to avoid floating pins
-    adc_select_input(8);
+    // The temperature sensor is the last ADC input: 8 on the 80 pin B package (RP2350B/RP2354B), 4 on the A package
+    adc_select_input(ADC_TEMPERATURE_CHANNEL_NUM);
 
     // 1. Instantly pull a fresh, clean hardware conversion (integer only)
     internal_temp_raw = adc_read();
@@ -125,8 +125,8 @@ void init_automatic_temp_sensor() {
     adc_init();
     adc_set_temp_sensor_enabled(true);
 
-    // Hardcode channel 8 configuration to match the physical QFN-80 layout
-    adc_select_input(8);
+    // Select the temperature sensor input (ADC input 8 on the QFN-80 package)
+    adc_select_input(ADC_TEMPERATURE_CHANNEL_NUM);
 
     // Create a background hardware timer that fires every 500 milliseconds
     static struct repeating_timer timer;
@@ -227,7 +227,7 @@ int main() {
     // Start the heartbeat (Cross-Platform)
     universal_tick_init();
 
-    // Initialize the automatic temperature sensor reading via ADC and DMA
+    // Start reading the internal temperature sensor every 500 ms from a repeating timer
     init_automatic_temp_sensor();
 
     // Launch core1_entry function on Core 1
@@ -247,13 +247,14 @@ int main() {
 
         if (now >= next_tick) {
 
-            // FIX: Load values into local variables constructed at runtime to prevent
-            // the compiler from compiling literal float constants inside QSPI flash memory.
-            volatile float v_ref = 3.3f;
-            volatile float adc_steps = 4096.0f;
-            volatile float temp_base = 27.0f;
-            volatile float slope_offset = 0.706f;
-            volatile float slope = 0.001721f;
+            // Convert the raw reading to degrees C with the formula from the RP2350 datasheet:
+            // T = 27 - (V - 0.706) / 0.001721, assuming the ADC reference (ADC_AVDD) is 3.3 V.
+            // The sensor isn't calibrated, so expect a few degrees of offset from chip to chip.
+            const float v_ref = 3.3f;
+            const float adc_steps = 4096.0f;
+            const float temp_base = 27.0f;
+            const float slope_offset = 0.706f;
+            const float slope = 0.001721f;
 
             float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
             internal_temp_c = temp_base - (voltage - slope_offset) / slope;

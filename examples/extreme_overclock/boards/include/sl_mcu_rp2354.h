@@ -6,7 +6,7 @@ pico_board_cmake_set(PICO_PLATFORM, rp2350)
 #define SL_MCU_RP2354
 
 // --- RP2350 VARIANT ---
-#define PICO_RP2350B 1
+#define PICO_RP2350A 0 // B package (QFN-80, 48 GPIO, 8 ADC inputs + temperature sensor)
 
 #ifndef PICO_FLASH_SIZE_BYTES
 #define PICO_FLASH_SIZE_BYTES (2 * 1024 * 1024)
