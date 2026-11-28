@@ -57,7 +57,10 @@
 #define XIP_CLKDIV_MIN 3                                                  // The boot setup's divider, never go faster than that
 #define XIP_CLKDIV_CALC ((SYS_CLOCK_KHZ + XIP_MAX_KHZ - 1) / XIP_MAX_KHZ) // Round up
 #define XIP_CLKDIV (XIP_CLKDIV_CALC > XIP_CLKDIV_MIN ? XIP_CLKDIV_CALC : XIP_CLKDIV_MIN)
-#define XIP_RXDELAY 4 // Read data sample delay, in half system clock cycles
+// Read data sample delay, in half system clock cycles. Read delay 4 is too late for divider 3 at the
+// 150 MHz boot clock (where it is set), so targets up to 270 MHz hung at boot. Divider 3 keeps the
+// boot setup's read delay 2 instead, which reads correctly at 150 MHz and at a 90 MHz flash clock.
+#define XIP_RXDELAY (XIP_CLKDIV > XIP_CLKDIV_MIN ? 4 : 2)
 
 #ifndef LED_DELAY
 #define LED_DELAY 500 // 500ms
@@ -70,7 +73,13 @@
 // Mutex for synchronizing access to printf
 auto_init_mutex(printf_mutex);
 
-volatile uint16_t internal_temp_raw = 0;
+// Temperature averaging: each reading is the mean of TEMP_SAMPLES ADC conversions (about 2 us each),
+// and the reported value is the running mean of the last TEMP_HISTORY readings (8 x 500 ms = 4 s).
+// A single conversion jumps about 0.5 °C per ADC step, the average resolves a small fraction of that.
+#define TEMP_SAMPLES 64
+#define TEMP_HISTORY 8
+
+volatile float internal_temp_raw = 0.0f; // Averaged raw ADC value, with fractions
 volatile float internal_temp_c = 0.0f;
 
 // Volatile variable to mimic STM32's uwTick
@@ -114,8 +123,25 @@ bool repeating_timer_callback(struct repeating_timer *t) {
     // The temperature sensor is the last ADC input: 8 on the 80 pin B package (RP2350B/RP2354B), 4 on the A package
     adc_select_input(ADC_TEMPERATURE_CHANNEL_NUM);
 
-    // 1. Instantly pull a fresh, clean hardware conversion (integer only)
-    internal_temp_raw = adc_read();
+    static uint32_t history[TEMP_HISTORY]; // Sums of the last TEMP_HISTORY readings
+    static uint32_t index = 0, count = 0, total = 0;
+
+    // Sum TEMP_SAMPLES back to back conversions (64 x 12 bit fits easily in 32 bits)
+    uint32_t sum = 0;
+    for (int i = 0; i < TEMP_SAMPLES; ++i) {
+        sum += adc_read();
+    }
+
+    // Running mean: replace the oldest sum in the history with the new one
+    total -= history[index];
+    history[index] = sum;
+    total += sum;
+    index = (index + 1) % TEMP_HISTORY;
+    if (count < TEMP_HISTORY) {
+        ++count; // The history fills up during the first 4 seconds
+    }
+
+    internal_temp_raw = (float)total / (float)(count * TEMP_SAMPLES);
 
     return true; // Keep the timer running endlessly
 }
@@ -256,7 +282,7 @@ int main() {
             const float slope_offset = 0.706f;
             const float slope = 0.001721f;
 
-            float voltage = (float)internal_temp_raw * (v_ref / adc_steps);
+            float voltage = internal_temp_raw * (v_ref / adc_steps);
             internal_temp_c = temp_base - (voltage - slope_offset) / slope;
 
             mutex_enter_blocking(&printf_mutex);                                                     // Ensure we've got exclusive access to printf
